@@ -47,9 +47,9 @@ jobs:
       run: |
         pytest tests --cov-config=.coveragerc --cov=geoana --cov-report=xml -s -v -W ignore::DeprecationWarning
 
-    - name: "Upload coverage to Codecov"
+    - name: Upload coverage reports to Codecov
       if: matrix.python-version == '3.11'
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         fail_ci_if_error: true
