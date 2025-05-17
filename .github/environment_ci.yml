@@ -3,7 +3,6 @@ channels:
   - conda-forge
 dependencies:
 # dependencies
-  - python=3.11
   - numpy>=1.22
   - scipy>=1.8
   - pymatsolver>=0.3
