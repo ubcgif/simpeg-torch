@@ -16,7 +16,7 @@ keywords = [
 ]
 dependencies = [
     "numpy>=1.22",
-    "pytorch",
+    "torch",
     "pymatsolver>=0.3",
     "matplotlib",
     "libdlf",
