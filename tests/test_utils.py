@@ -1,0 +1,192 @@
+import torch
+import pytest
+
+from simpegtorch.discretize.utils import (
+    sdiag,
+    # sub2ind,
+    # ndgrid,
+    mkvc,
+    is_scalar,
+    # inverse_2x2_block_diagonal,
+    # inverse_3x3_block_diagonal,
+    # inverse_property_tensor,
+    # make_property_tensor,
+    # index_cube,
+    # ind2sub,
+    as_array_n_by_dim,
+    # TensorType,
+    Zero,
+    Identity,
+    # extract_core_mesh,
+    # active_from_xyz,
+    # mesh_builder_xyz,
+    # refine_tree_xyz,
+    # unpack_widths,
+    # cross2d,
+)
+
+TOL = 1e-8
+
+@pytest.fixture
+def vectors():
+    return {
+        "a": torch.tensor([1, 2, 3]),
+        "b": torch.tensor([1, 2]),
+        "c": torch.tensor([1, 2, 3, 4]),
+    }
+
+def test_mkvc1(vectors):
+    x = mkvc(vectors["a"])
+    assert x.shape == (3,)
+
+def test_mkvc2(vectors):
+    x = mkvc(vectors["a"], 2)
+    assert x.shape == (3, 1)
+
+def test_mkvc3(self):
+    x = mkvc(vectors["a"], 3)
+    assert x.shape == (3, 1, 1)
+
+def test_zero(self):
+    z = Zero()
+    assert z == 0
+    assert not (z < 0)
+    assert z <= 0
+    assert not (z > 0)
+    assert z >= 0
+    assert +z == z
+    assert -z == z
+    assert z + 1 == 1
+    assert z + 3 + z == 3
+    assert z - 3 == -3
+    assert z - 3 - z == -3
+    assert 3 * z == 0
+    assert z * 3 == 0
+    assert z / 3 == 0
+
+    a = 1
+    a += z
+    assert a == 1
+    a = 1
+    a += z
+    assert a == 1
+    self.assertRaises(ZeroDivisionError, lambda: 3 / z)
+
+    assert mkvc(z) == 0
+    assert sdiag(z) * a == 0
+    assert z.T == 0
+    assert z.transpose() == 0
+
+def test_mat_zero(self):
+    z = Zero()
+    S = sdiag(torch.tensor([2, 3]))
+    assert S * z == 0
+
+def test_numpy_multiply(self):
+    z = Zero()
+    x = torch.tensor([1, 2, 3])
+    a = x * z
+    assert isinstance(a, Zero)
+
+    z = Zero()
+    x = torch.tensor([1, 2, 3])
+    a = z * x
+    assert isinstance(a, Zero)
+
+def test_one(self):
+    o = Identity()
+    assert o == 1
+    assert not (o < 1)
+    assert o <= 1
+    assert not (o > 1)
+    assert o >= 1
+    o = -o
+    assert o == -1
+    assert not (o < -1)
+    assert o <= -1
+    assert not (o > -1)
+    assert o >= -1
+    assert -1.0 * (-o) * o == -o
+    o = Identity()
+    assert +o == o
+    assert -o == -o
+    assert o * 3 == 3
+    assert -o * 3 == -3
+    assert -o * o == -1
+    assert -o * o * -o == 1
+    assert -o + 3 == 2
+    assert 3 + -o == 2
+
+    assert -o - 3 == -4
+    assert o - 3 == -2
+    assert 3 - -o == 4
+    assert 3 - o == 2
+
+    assert o // 2 == 0
+    assert o / 2.0 == 0.5
+    assert -o // 2 == -1
+    assert -o / 2.0 == -0.5
+    assert 2 / o == 2
+    assert 2 // -o == -2
+    assert 2.3 // o == 2
+    assert 2.3 // -o == -3
+
+    assert o.T == 1
+    assert o.transpose() == 1
+
+def test_mat_one(self):
+    o = Identity()
+    S = sdiag(torch.tensor([2, 3]))
+
+    def check(exp, ans):
+        assert torch.all((exp).todense() == ans)
+
+    check(S * o, [[2, 0], [0, 3]])
+    check(o * S, [[2, 0], [0, 3]])
+    check(S * -o, [[-2, 0], [0, -3]])
+    check(-o * S, [[-2, 0], [0, -3]])
+    check(S / o, [[2, 0], [0, 3]])
+    check(S / -o, [[-2, 0], [0, -3]])
+    self.assertRaises(NotImplementedError, lambda: o / S)
+
+    check(S + o, [[3, 0], [0, 4]])
+    check(o + S, [[3, 0], [0, 4]])
+    check(S - o, [[1, 0], [0, 2]])
+
+    check(S + -o, [[1, 0], [0, 2]])
+    check(-o + S, [[1, 0], [0, 2]])
+
+def test_mat_shape(self):
+    o = Identity()
+    S = sdiag(torch.tensor([2, 3]))[:1, :]
+    self.assertRaises(ValueError, lambda: S + o)
+
+    def check(exp, ans):
+        assert torch.all((exp).todense() == ans)
+
+    check(S * o, [[2, 0]])
+    check(S * -o, [[-2, 0]])
+
+def test_numpy_one(self):
+    o = Identity()
+    n = torch.tensor([2.0, 3])
+
+    assert torch.all(n + 1 == n + o)
+    assert torch.all(1 + n == o + n)
+    assert torch.all(n - 1 == n - o)
+    assert torch.all(1 - n == o - n)
+    assert torch.all(n / 1 == n / o)
+    assert torch.all(n / -1 == n / -o)
+    assert torch.all(1 / n == o / n)
+    assert torch.all(-1 / n == -o / n)
+    assert torch.all(n * 1 == n * o)
+    assert torch.all(n * -1 == n * -o)
+    assert torch.all(1 * n == o * n)
+    assert torch.all(-1 * n == -o * n)
+
+def test_both(self):
+    z = Zero()
+    o = Identity()
+    assert o * z == 0
+    assert o * z + o == 1
+    assert o - z == 1
