@@ -1,8 +1,12 @@
 import torch
-from .utils import atleast_1d
+from .base_mesh import BaseMesh
+
+from ..utils import atleast_1d, Identity
 
 
-class BaseRegularMesh:
+class BaseRegularMesh(BaseMesh):
+    _items = {"shape_cells", "origin", "orientation", "reference_system"}
+
     def __init__(
         self,
         shape_cells,
@@ -15,15 +19,15 @@ class BaseRegularMesh:
 
         if dtype is None:
             dtype = torch.float64
-        self.dtype = dtype
+        self._dtype = dtype
 
         if device is None:
             device = "cpu"
-        self.device = device
+        self._device = device
 
         if origin is None:
             origin = torch.zeros(self.dim, dtype=self.dtype, device=self.device)
-        self.origin = origin
+        self._origin = origin
 
     @property
     def origin(self):
@@ -53,6 +57,88 @@ class BaseRegularMesh:
                 f"origin and shape must be the same length, got {len(value)} and {self.dim}"
             )
         self._origin = value
+
+    @property
+    def orientation(self):
+        """Rotation matrix defining mesh axes relative to Cartesian.
+
+        This property returns a rotation matrix between the local coordinate
+        axes of the mesh and the standard Cartesian axes. For a 3D mesh, this
+        would define the x, y and z axes of the mesh relative to the Easting,
+        Northing and elevation directions. The *orientation* property can
+        be used to transform locations from a local coordinate
+        system to a conventional Cartesian system. By default, *orientation*
+        is an identity matrix of shape (mesh.dim, mesh.dim).
+
+        Returns
+        -------
+        (dim, dim) numpy.ndarray of float
+            Square rotation matrix defining orientation
+
+        Examples
+        --------
+        For a visual example of this, please see the figure in the
+        docs for :class:`~discretize.mixins.InterfaceVTK`.
+        """
+        return self._orientation
+
+    @orientation.setter
+    def orientation(self, value):
+
+        if isinstance(value, Identity):
+            self._orientation = torch.eye(self.dim, dtype=torch.float64)
+        else:
+            R = torch.atleast_2d(torch.as_tensor(value, dtype=torch.float64))
+            dim = self.dim
+            if R.shape != (dim, dim):
+                raise ValueError(
+                    f"Orientation matrix must be square and of shape {(dim, dim)}, got {tuple(R.shape)}"
+                )
+            # Normalize each row
+            R = R / torch.linalg.norm(R, dim=1, keepdim=True)
+
+            # Check orthogonality: R @ R.T should be close to identity
+            if not torch.allclose(
+                R @ R.T, torch.eye(dim, dtype=torch.float64), rtol=1e-5, atol=1e-6
+            ):
+                raise ValueError("Orientation matrix is not orthogonal")
+
+            self._orientation = R
+
+    @property
+    def reference_system(self):
+        """Coordinate reference system.
+
+        The type of coordinate reference frame. Will be one of the values "cartesian",
+        "cylindrical", or "spherical".
+
+        Returns
+        -------
+        str {'cartesian', 'cylindrical', 'spherical'}
+            The coordinate system associated with the mesh.
+        """
+        return self._reference_system
+
+    @reference_system.setter
+    def reference_system(self, value):
+        """Check if the reference system is of a known type."""
+        choices = ["cartesian", "cylindrical", "spherical"]
+        # Here are a few abbreviations that users can harnes
+        abrevs = {
+            "car": choices[0],
+            "cart": choices[0],
+            "cy": choices[1],
+            "cyl": choices[1],
+            "sph": choices[2],
+        }
+        # Get the name and fix it if it is abbreviated
+        value = value.lower()
+        value = abrevs.get(value, value)
+        if value not in choices:
+            raise ValueError(
+                "Coordinate system ({}) unknown.".format(self.reference_system)
+            )
+        self._reference_system = value
 
     @property
     def device(self):
@@ -105,9 +191,6 @@ class BaseRegularMesh:
         (dim) tuple of int
             the number of cells in each coordinate direcion
 
-        Notes
-        -----
-        Property also accessible as using the shorthand **vnC**
         """
         return self._shape_cells
 

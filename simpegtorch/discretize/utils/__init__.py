@@ -1,8 +1,7 @@
 """
 ========================================================
-Utility Classes and Functions (:mod:`discretize.utils`)
+Utility Classes and Functions
 ========================================================
-.. currentmodule:: discretize.utils
 
 The ``utils`` package contains utilities for helping with common operations involving
 discrete meshes
@@ -103,7 +102,12 @@ Utilities for Curvilinear Meshes
   index_cube
 """
 
-from .code_utils import is_scalar, atleast_1d, as_array_n_by_dim  # , requires
+from .code_utils import (
+    is_scalar,
+    atleast_1d,
+    as_array_n_by_dim,
+    fortran_ravel_index,
+)  # , requires
 from .matrix_utils import (
     mkvc,
     sdiag,
@@ -128,7 +132,7 @@ from .matrix_utils import (
     Zero,
     Identity,
 )
-from discretize.utils.mesh_utils import (
+from .mesh_utils import (
     unpack_widths,
     #     closest_points_index,
     #     extract_core_mesh,
@@ -139,15 +143,15 @@ from discretize.utils.mesh_utils import (
     #     example_simplex_mesh,
 )
 
-# from discretize.utils.curvilinear_utils import (
+# from .curvilinear_utils import (
 #     example_curvilinear_grid,
 #     volume_tetrahedron,
 #     face_info,
 #     index_cube,
 # )
-from discretize.utils.interpolation_utils import interpolation_matrix, volume_average
+from .interpolation_utils import interpolation_matrix, volume_average
 
-# from discretize.utils.coordinate_utils import (
+# from .coordinate_utils import (
 #     rotate_points_from_normals,
 #     rotation_matrix_from_normals,
 #     cyl2cart,
@@ -157,4 +161,4 @@ from discretize.utils.interpolation_utils import interpolation_matrix, volume_av
 #     # rotate_vec_cyl2cart
 # )
 
-# from discretize.utils.io_utils import download, load_mesh
+# from .io_utils import download, load_mesh

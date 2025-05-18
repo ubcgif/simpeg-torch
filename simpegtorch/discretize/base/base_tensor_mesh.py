@@ -1,5 +1,5 @@
 import torch
-from .utils import (
+from ..utils import (
     is_scalar,
     make_boundary_bool,
     unpack_widths,
@@ -7,7 +7,7 @@ from .utils import (
     as_array_n_by_dim,
     interpolation_matrix,
 )
-from .base import BaseRectangularMesh, BaseRegularMesh
+from .base_regular_mesh import BaseRectangularMesh, BaseRegularMesh
 
 
 class BaseTensorMesh(BaseRectangularMesh):
@@ -56,7 +56,19 @@ class BaseTensorMesh(BaseRectangularMesh):
         The function used to expand a ``list`` or ``tuple`` to generate widths.
     """
 
-    def __init__(self, h, origin=None):
+    _unitDimensions = [1, 1, 1]
+    _items = {"h"} | BaseRegularMesh._items
+
+    def __init__(self, h, origin=None, shape_cells=None, dtype=None, device=None):
+        if dtype is None:
+            dtype = torch.float64
+
+        if device is None:
+            device = "cpu"
+        self._device = device
+
+        self.dtype = dtype
+        self.device = device
         try:
             h = list(h)  # ensure value is a list (and make a copy)
         except TypeError:
@@ -65,7 +77,7 @@ class BaseTensorMesh(BaseRectangularMesh):
             raise ValueError("h must be of dimension 1, 2, or 3 not {}".format(len(h)))
         # expand value
         for i, h_i in enumerate(h):
-            if is_scalar(h_i) and not isinstance(h_i, torch.tensor):
+            if is_scalar(h_i) and not isinstance(h_i, torch.Tensor):
                 # This gives you something over the unit cube.
                 h_i = self._unitDimensions[i] * torch.ones(int(h_i)) / int(h_i)
             elif isinstance(h_i, (list, tuple)):
@@ -123,6 +135,8 @@ class BaseTensorMesh(BaseRectangularMesh):
                 value[i] = -h_i.sum() * 0.5
             elif val == "N":
                 value[i] = -h_i.sum()
+            elif val == "0":
+                value[i] = 0
         value = torch.as_tensor(value, dtype=self.dtype, device=self.device)
         self._origin = value
 
@@ -350,7 +364,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         (n_faces_x, dim) torch.tensor of float
             Gridded x-face locations
         """
-        if self.nFx == 0:
+        if self.n_faces_x == 0:
             return
         return self._getTensorGrid("faces_x")
 
@@ -368,7 +382,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         n_faces_y, dim) torch.tensor of float or None
             Gridded y-face locations for 2D and 3D mesh. Returns *None* for 1D meshes.
         """
-        if self.nFy == 0 or self.dim < 2:
+        if self.n_faces_y == 0 or self.dim < 2:
             return
         return self._getTensorGrid("faces_y")
 
@@ -386,7 +400,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         (n_faces_z, dim) torch.tensor of float or None
             Gridded z-face locations for 3D mesh. Returns *None* for 1D and 2D meshes.
         """
-        if self.nFz == 0 or self.dim < 3:
+        if self.n_faces_z == 0 or self.dim < 3:
             return
         return self._getTensorGrid("faces_z")
 
@@ -486,7 +500,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         (n_edges_x, dim) torch.tensor of float or None
             Gridded x-edge locations. Returns *None* if `shape_edges_x[0]` is 0.
         """
-        if self.nEx == 0:
+        if self.n_edges_x == 0:
             return
         return self._getTensorGrid("edges_x")
 
@@ -504,7 +518,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         (n_edges_y, dim) torch.tensor of float
             Gridded y-edge locations. Returns *None* for 1D meshes.
         """
-        if self.nEy == 0 or self.dim < 2:
+        if self.n_edges_y == 0 or self.dim < 2:
             return
         return self._getTensorGrid("edges_y")
 
@@ -522,7 +536,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         (n_edges_z, dim) torch.tensor of float
             Gridded z-edge locations. Returns *None* for 1D and 2D meshes.
         """
-        if self.nEz == 0 or self.dim < 3:
+        if self.n_edges_z == 0 or self.dim < 3:
             return
         return self._getTensorGrid("edges_z")
 
@@ -711,9 +725,9 @@ class BaseTensorMesh(BaseRectangularMesh):
             if self.dim <= ind:
                 raise ValueError("mesh is not high enough dimension.")
             if "f" in location_type.lower():
-                counts = (self.nFx, self.nFy, self.nFz)[: self.dim]
+                counts = (self.n_faces_x, self.n_faces_y, self.n_faces_z)[: self.dim]
             else:
-                counts = (self.nEx, self.nEy, self.nEz)[: self.dim]
+                counts = (self.n_edges_x, self.n_edges_y, self.n_edges_z)[: self.dim]
 
             components = []
             for i, n in enumerate(counts):

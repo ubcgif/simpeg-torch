@@ -107,36 +107,43 @@ def get_diag(A):
 
 def sdinv(M):
     """
-    Return the inverse of a sparse diagonal matrix.
+    Return the inverse of a sparse diagonal matrix in PyTorch.
 
     Parameters
     ----------
     M : torch.sparse.Tensor
-        A (n, n) sparse diagonal matrix created by `sdiag`.
+        A sparse diagonal matrix of shape (n, n)
 
     Returns
     -------
     torch.sparse.Tensor
-        A (n, n) sparse diagonal matrix whose diagonal elements are the reciprocal of M's.
+        Inverse of the input sparse diagonal matrix
+
+    Raises
+    ------
+    TypeError
+        If the input is not a sparse tensor.
+    ValueError
+        If the matrix contains non-diagonal entries.
+    ZeroDivisionError
+        If the matrix contains zeros on the diagonal.
     """
     if not M.is_sparse:
-        raise ValueError("Input matrix M must be a sparse tensor.")
+        raise TypeError("Input must be a torch sparse tensor.")
 
     indices = M._indices()
     values = M._values()
 
-    row, col = indices
-    if any(row != col):
-        raise ValueError("Cannot invert a sparse matrix with off diagonal entries.")
+    # Check for non-diagonal entries
+    is_diag = indices[0] == indices[1]
+    if not torch.all(is_diag):
+        raise ValueError("Input sparse matrix has non-zero off-diagonal entries.")
 
-    # Ensure all diagonal values are non-zero
-    if torch.any(values == 0):
+    diag = values[is_diag]
+    if (diag == 0).any():
         raise ZeroDivisionError("Cannot invert a diagonal matrix with zero entries.")
 
-    inv_values = 1.0 / values
-    return torch.sparse_coo_tensor(
-        indices, inv_values, M.shape, dtype=M.dtype, device=M.device
-    )
+    return sdiag(1.0 / diag)
 
 
 def make_boundary_bool(shape, bdir="xyz"):

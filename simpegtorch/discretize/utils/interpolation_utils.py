@@ -225,3 +225,120 @@ def _volume_avg_weights(x1, x2):
         torch.tensor(i1_list, dtype=torch.long, device=device),
         torch.tensor(i2_list, dtype=torch.long, device=device),
     )
+
+
+def volume_average(
+    mesh_in, mesh_out, values=None, output=None, dtype=torch.float64, device=None
+):
+    """Volume averaging interpolation between meshes.
+
+    This volume averaging function looks for overlapping cells in each mesh,
+    and weights the output values by the partial volume ratio of the overlapping
+    input cells. The volume average operation should result in an output such that
+    ``torch.sum(mesh_in.cell_volumes*values)`` = ``torch.sum(mesh_out.cell_volumes*output)``,
+    when the input and output meshes have the exact same extent. When the output mesh
+    extent goes beyond the input mesh, it is assumed to have constant values in that
+    direction. When the output mesh extent is smaller than the input mesh, only the
+    overlapping extent of the input mesh contributes to the output.
+
+    This function operates in three different modes. If only *mesh_in* and
+    *mesh_out* are given, the returned value is a ``scipy.sparse.csr_matrix``
+    that represents this operation (so it could potentially be applied repeatedly).
+    If *values* is given, the volume averaging is performed right away (without
+    internally forming the matrix) and the returned value is the result of this.
+    If *output* is given as well, it will be filled with the values of the
+    operation and then returned (assuming it has the correct ``dtype``).
+
+    Parameters
+    ----------
+    mesh_in : ~discretize.TensorMesh or ~discretize.TreeMesh
+        Input mesh (the mesh you are interpolating from)
+    mesh_out : ~discretize.TensorMesh or ~discretize.TreeMesh
+        Output mesh (the mesh you are interpolating to)
+    values : (mesh_in.n_cells) numpy.ndarray, optional
+        Array with values defined at the cells of ``mesh_in``
+    output : (mesh_out.n_cells) numpy.ndarray of float, optional
+        Output array to be overwritten
+
+    Returns
+    -------
+    (mesh_out.n_cells, mesh_in.n_cells) scipy.sparse.csr_matrix or (mesh_out.n_cells) numpy.ndarray
+        If *values* = *None* , the returned value is a matrix representing this
+        operation, otherwise it is a :class:`numpy.ndarray` of the result of the
+        operation.
+
+    Examples
+    --------
+    Create two meshes with the same extent, but different divisions (the meshes
+    do not have to be the same extent).
+
+    >>> import numpy as np
+    >>> from discretize import TensorMesh
+    >>> rng = np.random.default_rng(853)
+    >>> h1 = np.ones(32)
+    >>> h2 = np.ones(16)*2
+    >>> mesh_in = TensorMesh([h1, h1])
+    >>> mesh_out = TensorMesh([h2, h2])
+
+    Create a random model defined on the input mesh, and use volume averaging to
+    interpolate it to the output mesh.
+
+    >>> from discretize.utils import volume_average
+    >>> model1 = rng.random(mesh_in.nC)
+    >>> model2 = volume_average(mesh_in, mesh_out, model1)
+
+    Because these two meshes' cells are perfectly aligned, but the output mesh
+    has 1 cell for each 4 of the input cells, this operation should effectively
+    look like averaging each of those cells values
+
+    >>> import matplotlib.pyplot as plt
+    >>> plt.figure(figsize=(6, 3))
+    >>> ax1 = plt.subplot(121)
+    >>> mesh_in.plot_image(model1, ax=ax1)
+    >>> ax2 = plt.subplot(122)
+    >>> mesh_out.plot_image(model2, ax=ax2)
+    >>> plt.show()
+
+    """
+    try:
+        in_type = mesh_in._meshType
+        out_type = mesh_out._meshType
+    except AttributeError:
+        raise TypeError("Both input and output mesh must be valid discetize meshes")
+
+    valid_meshs = ["TENSOR", "TREE"]
+    if in_type not in valid_meshs or out_type not in valid_meshs:
+        raise NotImplementedError(
+            f"Volume averaging is only implemented for TensorMesh and TreeMesh, "
+            f"not {type(mesh_in).__name__} and/or {type(mesh_out).__name__}"
+        )
+
+    if mesh_in.dim != mesh_out.dim:
+        raise ValueError("Both meshes must have the same dimension")
+
+    if values is not None and len(values) != mesh_in.nC:
+        raise ValueError(
+            "Input array does not have the same length as the number of cells in input mesh"
+        )
+    if output is not None and len(output) != mesh_out.nC:
+        raise ValueError(
+            "Output array does not have the same length as the number of cells in output mesh"
+        )
+
+    if values is not None:
+        values = torch.tensor(values, dtype=dtype, device=device)
+    if output is not None:
+        output = torch.tensor(output, dtype=dtype, device=device)
+
+    if in_type == "TENSOR":
+        if out_type == "TENSOR":
+            return _tensor_volume_averaging(mesh_in, mesh_out, values, output)
+        elif out_type == "TREE":
+            return mesh_out._vol_avg_from_tens(mesh_in, values, output)
+    elif in_type == "TREE":
+        if out_type == "TENSOR":
+            return mesh_in._vol_avg_to_tens(mesh_out, values, output)
+        elif out_type == "TREE":
+            return mesh_out._vol_avg_from_tree(mesh_in, values, output)
+    else:
+        raise TypeError("Unsupported mesh types")

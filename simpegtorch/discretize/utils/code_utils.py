@@ -91,3 +91,12 @@ def as_array_n_by_dim(pts, dim, dtype=None, device=None):
         )
 
     return pts
+
+
+def fortran_ravel_index(index, shape):
+    stride = 1
+    flat_index = 0
+    for i, s in zip(index, shape):
+        flat_index += i * stride
+        stride *= s
+    return flat_index
