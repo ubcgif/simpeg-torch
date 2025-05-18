@@ -20,6 +20,9 @@ def mkvc(x, n_dims=1, dtype=None, device=None):
     torch.Tensor
         A flattened tensor with at least ``n_dims`` dimensions.
     """
+    if isinstance(x, Zero) or isinstance(x, Identity):
+        return x
+
     x = torch.as_tensor(x, dtype=dtype, device=device)
 
     if x.ndim > 1:
@@ -65,6 +68,38 @@ def sdiag(v, dtype=None, device=None):
 
     return torch.sparse_coo_tensor(indices, values, (n, n), dtype=v.dtype, device=v.device)
 
+def get_diag(A):
+    """
+    Extract the diagonal of a PyTorch sparse matrix.
+
+    Parameters
+    ----------
+    A : torch.sparse.Tensor
+        A 2D sparse tensor in COO format.
+
+    Returns
+    -------
+    torch.Tensor
+        A 1D dense tensor containing the diagonal elements. Zero if no value on the diagonal.
+    """
+    if not A.is_sparse:
+        raise TypeError("Input must be a sparse tensor.")
+    if A.ndim != 2 or A.shape[0] != A.shape[1]:
+        raise ValueError("Input must be a square 2D sparse matrix.")
+
+    n = A.shape[0]
+    diag = torch.zeros(n, dtype=A.dtype, device=A.device)
+
+    indices = A._indices()
+    values = A._values()
+
+    mask = indices[0] == indices[1]  # positions where row == col
+    diag_indices = indices[0, mask]
+    diag_values = values[mask]
+
+    diag[diag_indices] = diag_values
+    return diag
+
 def sdinv(M):
     """
     Return the inverse of a sparse diagonal matrix.
@@ -84,6 +119,10 @@ def sdinv(M):
 
     indices = M._indices()
     values = M._values()
+
+    row, col = indices
+    if any (row != col):
+        raise ValueError("Cannot invert a sparse matrix with off diagonal entries.")
 
     # Ensure all diagonal values are non-zero
     if torch.any(values == 0):
@@ -119,8 +158,8 @@ class Zero(object):
     Zero
     """
 
-    __numpy_ufunc__ = True
-    __array_ufunc__ = None
+    # __numpy_ufunc__ = True
+    # __array_ufunc__ = None
 
     def __repr__(self):
         """Represent zeros a string."""
@@ -204,7 +243,10 @@ class Zero(object):
 
     def __eq__(self, v):
         """Compare equal to zero."""
-        return v == 0
+        return isinstance(v, Zero) or (v == 0)
+
+    def __req__(self, v):
+        return self.__eq__(v)
 
     def __ne__(self, v):
         """Compare not equal to zero."""
@@ -241,7 +283,8 @@ class Zero(object):
         """Return the *Zero* class as an operator."""
         return self
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if func.__name__ in {"add", "radd"}:
             return args[1] if args[0] is self else args[0]
         if func.__name__ in {"sub"}:
@@ -249,7 +292,7 @@ class Zero(object):
         if func.__name__ in {"rsub"}:
             return args[0]
         if func.__name__ in {"mul", "mm", "matmul"}:
-            return self
+            return cls()
         return NotImplemented
 
 class Identity:
@@ -268,10 +311,11 @@ class Identity:
         return Identity(not self._positive)
 
     def __add__(self, v):
-        return v + 1 if self._positive else v - 1
+        return self._apply_to_tensor(v, op="add")
 
     def __radd__(self, v):
-        return self + v
+        return self.__add__(v)
+        # return v + 1 if self._positive else v - 1
 
     def __sub__(self, v):
         return self + -v
@@ -292,9 +336,18 @@ class Identity:
         return v if self._positive else -v
 
     def __truediv__(self, v):
+        if torch.is_tensor(v):
+            if v.ndim == 1:
+                return (1.0 / v) if self._positive else (-1.0 / v)
+            elif v.is_sparse:
+                return (torch.ones(v.shape[0], device=v.device, dtype=v.dtype) / v.to_dense()).to_sparse()
+            else:
+                return torch.ones_like(v) / v if self._positive else -torch.ones_like(v) / v
         return 1.0 / v if self._positive else -1.0 / v
 
     def __rtruediv__(self, v):
+        if torch.is_tensor(v):
+            return v if self._positive else -v
         return v if self._positive else -v
 
     def __floordiv__(self, v):
@@ -312,6 +365,9 @@ class Identity:
     def __eq__(self, v):
         val = 1 if self._positive else -1
         return torch.equal(v, torch.tensor(val, dtype=v.dtype, device=v.device)) if torch.is_tensor(v) else v == val
+
+    def __req__(self, v):
+        return self.__eq__(v)
 
     def __ne__(self, v):
         return not self.__eq__(v)
@@ -340,21 +396,117 @@ class Identity:
     def transpose(self):
         return self
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
-        if func.__name__ in {"add", "radd"}:
-            return args[1] + 1 if args[0] is self else args[0] + 1
-        if func.__name__ in {"sub"}:
-            return -args[1] + 1
-        if func.__name__ == "rsub":
-            return args[0] + (-1)
-        if func.__name__ in {"mul", "mm", "matmul"}:
-            return args[1] if self._positive else -args[1]
-        if func.__name__ in {"div", "truediv", "floordiv"}:
-            return (1.0 / args[1]) if self._positive else (-1.0 / args[1])
-        if func.__name__ in {"rtruediv", "rfloordiv"}:
-            return args[0] if self._positive else -args[0]
-        return NotImplemented
+    def _apply_to_tensor(self, tensor, op="add"):
+        if not torch.is_tensor(tensor):
+            val = 1 if self._positive else -1
+            return tensor + val if op == "add" else tensor - val
+
+        sign = 1 if self._positive else -1
+
+        if tensor.is_sparse:
+            return tensor + sign * sdiag(torch.ones(tensor.shape[0]))
+
+            # if op == "add":
+            #     new_diag = diag + sign
+            # elif op == "sub":
+            #     new_diag = diag - sign
+            # else:
+            #     raise NotImplementedError(f"Unsupported op: {op}")
+            # return sdiag(new_diag)
+
+        else:  # dense tensor
+            return tensor + sign if op == "add" else tensor - sign
+
+
+    # @classmethod
+    # def __torch_function__(cls, func, types, args=(), kwargs=None):
+    #     kwargs = kwargs or {}
+
+    #     identity_arg = next((a for a in args if isinstance(a, cls)), None)
+    #     if identity_arg is None:
+    #         return NotImplemented
+
+    #     pos = identity_arg._positive
+
+    #     def _safe_add(v, val):
+    #         if torch.is_tensor(v):
+    #             if v.is_sparse:
+    #                 return (v.to_dense() + val).to_sparse()
+    #             return v + val
+    #         return v + val
+
+    #     def _safe_sub(v, val):
+    #         print(f"safe sub: {v}, {val}")
+    #         if torch.is_tensor(v):
+    #             if v.is_sparse:
+    #                 return (v.to_dense() - val).to_sparse()
+    #             return v - val
+    #         return v - val
+
+    #     def _safe_neg(v):
+    #         if torch.is_tensor(v) and v.is_sparse:
+    #             return (-v.to_dense()).to_sparse()
+    #         return -v
+
+    #     def _safe_div(val, v):
+    #         if torch.is_tensor(v) and v.is_sparse:
+    #             return (torch.full_like(v.to_dense(), val) / v.to_dense()).to_sparse()
+    #         return val / v
+
+    #     if func.__name__ in {"add", "radd"}:
+    #         a, b = args
+    #         identity_on_left = isinstance(a, cls)
+    #         identity_arg = a if identity_on_left else b
+    #         pos = identity_arg._positive
+    #         tensor = b if identity_on_left else a
+
+    #         if torch.is_tensor(tensor):
+    #             if tensor.is_sparse:
+    #                 # handle sparse diagonal addition
+    #                 if torch.is_tensor(tensor) and len(tensor.shape) > 1:
+    #                     return tensor + sdiag(torch.ones(tensor.shape[0]))
+    #             else:
+    #                 return tensor + (1 if pos else -1)
+
+    #         return tensor + (1 if pos else -1)
+
+    #     if func.__name__ in {"sub", "rsub"}:
+    #         print(args)
+    #         a, b = args
+    #         if isinstance(b, cls):
+    #             tensor = a
+    #             print(f"a: {tensor}")
+    #             if torch.is_tensor(tensor) and len(tensor.shape) > 1:
+    #                 return tensor - sdiag(torch.ones(tensor.shape[0]))
+    #             return _safe_sub(tensor, 1 if pos else -1)
+    #         else:
+    #             if isinstance(a, cls):
+    #                 tensor = b
+    #                 print(f"b: {tensor}")
+    #                 if torch.is_tensor(tensor) and len(tensor.shape) > 1:
+    #                     return sdiag(torch.ones(tensor.shape[0])) - tensor
+    #             return _safe_sub(1 if pos else -1, tensor)
+
+    #     if func.__name__ in {"mul", "mm", "matmul"}:
+    #         a, b = args
+    #         other = b if isinstance(a, cls) else a
+    #         return other if pos else _safe_neg(other)
+
+    #     if func.__name__ in {"div", "truediv", "floordiv"}:
+    #         a, b = args
+    #         if isinstance(a, cls):
+    #             return _safe_div(1.0 if pos else -1.0, b)
+    #         else:
+    #             return a if pos else _safe_neg(a)
+
+    #     if func.__name__ in {"rtruediv", "rfloordiv"}:
+    #         a, b = args
+    #         if isinstance(b, cls):
+    #             return a if pos else _safe_neg(a)
+
+    #     return NotImplemented
+
+
 
 class _inftup(tuple):
     """An infinitely long tuple of a value repeated infinitely."""
