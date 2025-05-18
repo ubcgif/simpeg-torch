@@ -3,7 +3,7 @@ import numpy as np
 from .tensor_mesh import TensorMesh
 
 
-def setup_torch_mesh(mesh_type, nC, nDim=3, random_seed=None):
+def setup_mesh(mesh_type, nC, nDim=3, random_seed=None):
     # Set up random number generator if needed
     if "random" in mesh_type:
         rng = torch.Generator()
@@ -45,10 +45,26 @@ class OrderTest:
     random_seed = None
 
     def setupMesh(self, nC):
-        raise NotImplementedError("You must implement setupMesh in your subclass")
+        """Generate mesh and set as current mesh for testing.
+
+        Parameters
+        ----------
+        nC : int
+            Number of cells along each axis.
+
+        Returns
+        -------
+        Float
+            Maximum cell width for the mesh
+        """
+        mesh, max_h = setup_mesh(
+            self._meshType, nC, self.meshDimension, random_seed=self.random_seed
+        )
+        self.M = mesh
+        return max_h
 
     def getError(self):
-        raise NotImplementedError("You must implement getError in your subclass")
+        return 1.0
 
     def orderTest(self, random_seed=None):
         if not isinstance(self.meshTypes, list):

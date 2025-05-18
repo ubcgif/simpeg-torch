@@ -1,6 +1,6 @@
 import torch
 
-from .base import BaseTensorMesh
+from .base import BaseTensorMesh, BaseRectangularMesh
 
 # from .operators import DiffOperators, InnerProducts
 # from .mixins import InterfaceMixins, TensorMeshIO
@@ -11,7 +11,7 @@ class TensorMesh(
     # DiffOperators,
     # InnerProducts,
     BaseTensorMesh,
-    # BaseRectangularMesh,
+    BaseRectangularMesh,
     # TensorMeshIO,
     # InterfaceMixins,
 ):

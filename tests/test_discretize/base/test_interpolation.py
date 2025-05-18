@@ -3,7 +3,6 @@ from simpegtorch.discretize.tests import OrderTest
 
 MESHTYPES = ["uniformTensorMesh", "randomTensorMesh"]
 TOLERANCES = [0.9, 0.5, 0.5]
-TOL = 1e-7
 
 
 def call1(fun, xyz):
@@ -27,27 +26,33 @@ def cart_row3(g, xfun, yfun, zfun):
 
 
 def cartF2(M, fx, fy):
-    return torch.cat([cart_row2(M.gridFx, fx, fy), cart_row2(M.gridFy, fx, fy)], dim=0)
+    return torch.cat(
+        [cart_row2(M.faces_x, fx, fy), cart_row2(M.faces_y, fx, fy)], dim=0
+    )
 
 
 def cartF2Cyl(M, fx, fy):
-    return torch.cat([cart_row2(M.gridFx, fx, fy), cart_row2(M.gridFz, fx, fy)], dim=0)
+    return torch.cat(
+        [cart_row2(M.faces_x, fx, fy), cart_row2(M.faces_z, fx, fy)], dim=0
+    )
 
 
 def cartE2(M, ex, ey):
-    return torch.cat([cart_row2(M.gridEx, ex, ey), cart_row2(M.gridEy, ex, ey)], dim=0)
+    return torch.cat(
+        [cart_row2(M.edges_x, ex, ey), cart_row2(M.edges_y, ex, ey)], dim=0
+    )
 
 
 def cartE2Cyl(M, ex, ey):
-    return cart_row2(M.gridEy, ex, ey)
+    return cart_row2(M.edges_y, ex, ey)
 
 
 def cartF3(M, fx, fy, fz):
     return torch.cat(
         [
-            cart_row3(M.gridFx, fx, fy, fz),
-            cart_row3(M.gridFy, fx, fy, fz),
-            cart_row3(M.gridFz, fx, fy, fz),
+            cart_row3(M.faces_x, fx, fy, fz),
+            cart_row3(M.faces_y, fx, fy, fz),
+            cart_row3(M.faces_z, fx, fy, fz),
         ],
         dim=0,
     )
@@ -56,9 +61,9 @@ def cartF3(M, fx, fy, fz):
 def cartE3(M, ex, ey, ez):
     return torch.cat(
         [
-            cart_row3(M.gridEx, ex, ey, ez),
-            cart_row3(M.gridEy, ex, ey, ez),
-            cart_row3(M.gridEz, ex, ey, ez),
+            cart_row3(M.edges_x, ex, ey, ez),
+            cart_row3(M.edges_y, ex, ey, ez),
+            cart_row3(M.edges_z, ex, ey, ez),
         ],
         dim=0,
     )
@@ -81,9 +86,9 @@ class TestInterpolation1D(OrderTest):
         ana = call1(funX, self.LOCS)
 
         if "CC" == self.type:
-            grid = call1(funX, self.M.gridCC)
+            grid = call1(funX, self.M.cell_centers)
         elif "N" == self.type:
-            grid = call1(funX, self.M.gridN)
+            grid = call1(funX, self.M.nodes)
 
         comp = self.M.get_interpolation_matrix(self.LOCS, self.type) * grid
 

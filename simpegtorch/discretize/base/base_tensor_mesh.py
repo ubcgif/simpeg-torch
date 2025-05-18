@@ -770,3 +770,8 @@ class BaseTensorMesh(BaseRectangularMesh):
             Q = Q_dense.to_sparse()
 
         return Q
+
+    def get_interpolation_matrix(  # NOQA D102
+        self, loc, location_type="cell_centers", zeros_outside=False, **kwargs
+    ):
+        return self._get_interpolation_matrix(loc, location_type, zeros_outside)
