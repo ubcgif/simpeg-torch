@@ -2,6 +2,7 @@ import torch
 from .utils import is_scalar, make_boundary_bool, unpack_widths, ndgrid
 from .base import BaseRectangularMesh, BaseRegularMesh
 
+
 class BaseTensorMesh(BaseRectangularMesh):
     """Base class for tensor-product style meshes.
 
@@ -65,13 +66,14 @@ class BaseTensorMesh(BaseRectangularMesh):
             if not isinstance(h_i, torch.Tensor):
                 try:
                     h_i = torch.tensor(h_i)
-                except:
-                    raise TypeError("h[{0:d}] cannot be cast to a torch tensor.".format(i))
+                except TypeError:
+                    raise TypeError(
+                        "h[{0:d}] cannot be cast to a torch tensor.".format(i)
+                    )
             if len(h_i.shape) != 1:
                 raise ValueError("h[{0:d}] must be a 1D array.".format(i))
             h[i] = h_i[:]  # make a copy.
         self._h = tuple(h)
-
 
         shape_cells = tuple([len(h_i) for h_i in h])
         super().__init__(shape_cells=shape_cells)  # do not pass origin here
@@ -158,7 +160,11 @@ class BaseTensorMesh(BaseRectangularMesh):
             the y-direction. Returns *None* for 1D meshes.
 
         """
-        return None if self.dim < 2 else torch.cat([self.origin[1].unsqueeze(0), self.h[1]]).cumsum(0)
+        return (
+            None
+            if self.dim < 2
+            else torch.cat([self.origin[1].unsqueeze(0), self.h[1]]).cumsum(0)
+        )
 
     @property
     def nodes_z(self):
@@ -180,7 +186,11 @@ class BaseTensorMesh(BaseRectangularMesh):
             the z-direction. Returns *None* for 1D and 2D meshes.
 
         """
-        return None if self.dim < 3 else torch.cat([self.origin[2].unsqueeze(0), self.h[2]]).cumsum(0)
+        return (
+            None
+            if self.dim < 3
+            else torch.cat([self.origin[2].unsqueeze(0), self.h[2]]).cumsum(0)
+        )
 
     @property
     def cell_centers_x(self):
@@ -270,7 +280,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         dim = self.dim
         if dim == 1:
             return self.nodes_x[[0, -1]]
-        return self.nodes[make_boundary_bool(self.shape_nodes, device=device)]
+        return self.nodes[make_boundary_bool(self.shape_nodes, device=self.device)]
 
     @property
     def h_gridded(self):
@@ -381,7 +391,9 @@ class BaseTensorMesh(BaseRectangularMesh):
         if self.faces_x is not None:
             faces.append(self.faces_x)
         else:
-            faces.append(torch.empty((0, self.dim), dtype=self.dtype, device=self.device))
+            faces.append(
+                torch.empty((0, self.dim), dtype=self.dtype, device=self.device)
+            )
 
         if self.dim > 1 and self.faces_y is not None:
             faces.append(self.faces_y)
@@ -418,12 +430,14 @@ class BaseTensorMesh(BaseRectangularMesh):
             nx = ndgrid(
                 torch.tensor([-1.0, 1.0], dtype=self.dtype, device=self.device),
                 torch.zeros(self.shape_cells[1], dtype=self.dtype, device=self.device),
-                dtype=self.dtype, device=self.device
+                dtype=self.dtype,
+                device=self.device,
             )
             ny = ndgrid(
                 torch.zeros(self.shape_cells[0], dtype=self.dtype, device=self.device),
                 torch.tensor([-1.0, 1.0], dtype=self.dtype, device=self.device),
-                dtype=self.dtype, device=self.device
+                dtype=self.dtype,
+                device=self.device,
             )
             return torch.cat([nx, ny], dim=0)
 
@@ -432,19 +446,21 @@ class BaseTensorMesh(BaseRectangularMesh):
                 torch.tensor([-1.0, 1.0], dtype=self.dtype, device=self.device),
                 torch.zeros(self.shape_cells[1], dtype=self.dtype, device=self.device),
                 torch.zeros(self.shape_cells[2], dtype=self.dtype, device=self.device),
-                dtype=self.dtype, device=self.device
+                dtype=self.dtype,
+                device=self.device,
             )
             ny = ndgrid(
                 torch.zeros(self.shape_cells[0], dtype=self.dtype, device=self.device),
                 torch.tensor([-1.0, 1.0], dtype=self.dtype, device=self.device),
                 torch.zeros(self.shape_cells[2], dtype=self.dtype, device=self.device),
-                dtype=self.dtype, device=self.device
+                dtype=self.dtype,
+                device=self.device,
             )
             nz = ndgrid(
                 torch.zeros(self.shape_cells[0], dtype=self.dtype, device=self.device),
                 torch.zeros(self.shape_cells[1], dtype=self.dtype, device=self.device),
                 torch.tensor([-1.0, 1.0], dtype=self.dtype, device=self.device),
-                dtype=self.dtype, device=self.device
+                dtype=self.dtype,
+                device=self.device,
             )
             return torch.cat([nx, ny, nz], dim=0)
-

@@ -2,6 +2,7 @@ import torch
 
 from .code_utils import is_scalar
 
+
 def unpack_widths(value, dtype=torch.float64, device=None):
     """Unpack a condensed representation of cell widths or time steps.
 
@@ -62,7 +63,10 @@ def unpack_widths(value, dtype=torch.float64, device=None):
             start = float(v[0])
             num = int(v[1])
             factor = float(v[2])
-            pad = ((torch.ones(num, dtype=dtype, device=device) * torch.abs(factor)) ** (torch.arange(num, dtype=dtype, device=device) + 1)) * start
+            pad = (
+                (torch.ones(num, dtype=dtype, device=device) * torch.abs(factor))
+                ** (torch.arange(num, dtype=dtype, device=device) + 1)
+            ) * start
             if factor < 0:
                 pad = pad[::-1]
             proposed += pad.tolist()

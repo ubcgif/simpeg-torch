@@ -1,5 +1,5 @@
 import torch
-from .utils import is_scalar, atleast_1d
+from .utils import atleast_1d
 
 
 class BaseRegularMesh:
@@ -24,7 +24,6 @@ class BaseRegularMesh:
         if origin is None:
             origin = torch.zeros(self.dim, dtype=self.dtype, device=self.device)
         self.origin = origin
-
 
     @property
     def origin(self):
@@ -67,7 +66,9 @@ class BaseRegularMesh:
             raise ValueError(f"Invalid device specification: {value!r}") from e
 
         if device.type == "cuda" and not torch.cuda.is_available():
-            raise ValueError("CUDA device specified, but no CUDA-capable device is available.")
+            raise ValueError(
+                "CUDA device specified, but no CUDA-capable device is available."
+            )
 
         self._device = device
 
@@ -141,7 +142,11 @@ class BaseRegularMesh:
         -----
         Property also accessible as using the shorthand **nEx**
         """
-        return int(torch.prod([x + y for x, y in zip(self.shape_cells, (0, 1, 1))], device=self.device))
+        return int(
+            torch.prod(
+                [x + y for x, y in zip(self.shape_cells, (0, 1, 1))], device=self.device
+            )
+        )
 
     @property
     def n_edges_y(self):
@@ -161,7 +166,11 @@ class BaseRegularMesh:
         """
         if self.dim < 2:
             return None
-        return int(torch.prod([x + y for x, y in zip(self.shape_cells, (1, 0, 1))], device=self.device))
+        return int(
+            torch.prod(
+                [x + y for x, y in zip(self.shape_cells, (1, 0, 1))], device=self.device
+            )
+        )
 
     @property
     def n_edges_z(self):
@@ -181,7 +190,11 @@ class BaseRegularMesh:
         """
         if self.dim < 3:
             return None
-        return int(torch.prod([x + y for x, y in zip(self.shape_cells, (1, 1, 0))], device=self.device))
+        return int(
+            torch.prod(
+                [x + y for x, y in zip(self.shape_cells, (1, 1, 0))], device=self.device
+            )
+        )
 
     @property
     def n_edges_per_direction(self):
@@ -241,7 +254,11 @@ class BaseRegularMesh:
         -----
         Property also accessible as using the shorthand **nFx**
         """
-        return int(torch.prod([x + y for x, y in zip(self.shape_cells, (1, 0, 0))], device=self.device))
+        return int(
+            torch.prod(
+                [x + y for x, y in zip(self.shape_cells, (1, 0, 0))], device=self.device
+            )
+        )
 
     @property
     def n_faces_y(self):
@@ -261,7 +278,11 @@ class BaseRegularMesh:
         """
         if self.dim < 2:
             return None
-        return int(torch.prod([x + y for x, y in zip(self.shape_cells, (0, 1, 0))], device=self.device))
+        return int(
+            torch.prod(
+                [x + y for x, y in zip(self.shape_cells, (0, 1, 0))], device=self.device
+            )
+        )
 
     @property
     def n_faces_z(self):
@@ -281,7 +302,11 @@ class BaseRegularMesh:
         """
         if self.dim < 3:
             return None
-        return int(torch.prod([x + y for x, y in zip(self.shape_cells, (0, 0, 1))], device=self.device))
+        return int(
+            torch.prod(
+                [x + y for x, y in zip(self.shape_cells, (0, 0, 1))], device=self.device
+            )
+        )
 
     @property
     def n_faces_per_direction(self):
@@ -329,65 +354,148 @@ class BaseRegularMesh:
     def face_normals(self):
 
         if self.dim == 2:
-            nX = torch.cat([
-                torch.ones((self.n_faces_x, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_faces_x, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
-            nY = torch.cat([
-                torch.zeros((self.n_faces_y, 1), dtype=self.dtype, device=self.device),
-                torch.ones((self.n_faces_y, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
+            nX = torch.cat(
+                [
+                    torch.ones(
+                        (self.n_faces_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_faces_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
+            nY = torch.cat(
+                [
+                    torch.zeros(
+                        (self.n_faces_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.ones(
+                        (self.n_faces_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
             return torch.cat([nX, nY], dim=0)
 
         elif self.dim == 3:
-            nX = torch.cat([
-                torch.ones((self.n_faces_x, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_faces_x, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_faces_x, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
-            nY = torch.cat([
-                torch.zeros((self.n_faces_y, 1), dtype=self.dtype, device=self.device),
-                torch.ones((self.n_faces_y, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_faces_y, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
-            nZ = torch.cat([
-                torch.zeros((self.n_faces_z, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_faces_z, 1), dtype=self.dtype, device=self.device),
-                torch.ones((self.n_faces_z, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
+            nX = torch.cat(
+                [
+                    torch.ones(
+                        (self.n_faces_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_faces_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_faces_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
+            nY = torch.cat(
+                [
+                    torch.zeros(
+                        (self.n_faces_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.ones(
+                        (self.n_faces_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_faces_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
+            nZ = torch.cat(
+                [
+                    torch.zeros(
+                        (self.n_faces_z, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_faces_z, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.ones(
+                        (self.n_faces_z, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
             return torch.cat([nX, nY, nZ], dim=0)
 
     @property
     def edge_tangents(self):
         """Return unit vectors tangent to each edge, on the correct device and dtype."""
         if self.dim == 2:
-            tX = torch.cat([
-                torch.ones((self.n_edges_x, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_edges_x, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
-            tY = torch.cat([
-                torch.zeros((self.n_edges_y, 1), dtype=self.dtype, device=self.device),
-                torch.ones((self.n_edges_y, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
+            tX = torch.cat(
+                [
+                    torch.ones(
+                        (self.n_edges_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_edges_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
+            tY = torch.cat(
+                [
+                    torch.zeros(
+                        (self.n_edges_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.ones(
+                        (self.n_edges_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
             return torch.cat([tX, tY], dim=0)
 
         elif self.dim == 3:
-            tX = torch.cat([
-                torch.ones((self.n_edges_x, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_edges_x, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_edges_x, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
-            tY = torch.cat([
-                torch.zeros((self.n_edges_y, 1), dtype=self.dtype, device=self.device),
-                torch.ones((self.n_edges_y, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_edges_y, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
-            tZ = torch.cat([
-                torch.zeros((self.n_edges_z, 1), dtype=self.dtype, device=self.device),
-                torch.zeros((self.n_edges_z, 1), dtype=self.dtype, device=self.device),
-                torch.ones((self.n_edges_z, 1), dtype=self.dtype, device=self.device)
-            ], dim=1)
+            tX = torch.cat(
+                [
+                    torch.ones(
+                        (self.n_edges_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_edges_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_edges_x, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
+            tY = torch.cat(
+                [
+                    torch.zeros(
+                        (self.n_edges_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.ones(
+                        (self.n_edges_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_edges_y, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
+            tZ = torch.cat(
+                [
+                    torch.zeros(
+                        (self.n_edges_z, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.zeros(
+                        (self.n_edges_z, 1), dtype=self.dtype, device=self.device
+                    ),
+                    torch.ones(
+                        (self.n_edges_z, 1), dtype=self.dtype, device=self.device
+                    ),
+                ],
+                dim=1,
+            )
             return torch.cat([tX, tY, tZ], dim=0)
+
 
 class BaseRectangularMesh(BaseRegularMesh):
     """Base rectangular mesh class for the ``discretize`` package.
@@ -568,47 +676,79 @@ class BaseRectangularMesh(BaseRegularMesh):
     @property
     def n_cells(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseMesh
-        return int(torch.prod(torch.tensor(self.shape_cells, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_cells, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_nodes(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseMesh
-        return int(torch.prod(torch.tensor(self.shape_nodes, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_nodes, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_edges_x(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseRegularMesh
-        return int(torch.prod(torch.tensor(self.shape_edges_x, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_edges_x, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_edges_y(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseRegularMesh
         if self.dim < 2:
             return
-        return int(torch.prod(torch.tensor(self.shape_edges_y, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_edges_y, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_edges_z(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseRegularMesh
         if self.dim < 3:
             return
-        return int(torch.prod(torch.tensor(self.shape_edges_z, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_edges_z, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_faces_x(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseRegularMesh
-        return int(torch.prod(torch.tensor(self.shape_faces_x, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_faces_x, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_faces_y(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseRegularMesh
         if self.dim < 2:
             return
-        return int(torch.prod(torch.tensor(self.shape_faces_y, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_faces_y, dtype=torch.int64, device=self.device)
+            ).item()
+        )
 
     @property
     def n_faces_z(self):  # NOQA D102
         # Documentation inherited from discretize.base.BaseRegularMesh
         if self.dim < 3:
             return
-        return int(torch.prod(torch.tensor(self.shape_faces_z, dtype=torch.int64, device=self.device)).item())
+        return int(
+            torch.prod(
+                torch.tensor(self.shape_faces_z, dtype=torch.int64, device=self.device)
+            ).item()
+        )

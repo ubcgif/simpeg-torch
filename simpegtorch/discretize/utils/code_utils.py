@@ -3,6 +3,7 @@ import torch
 
 SCALARTYPES = (complex, float, int, np.number)
 
+
 def is_scalar(f):
     """Determine if the input argument is a scalar.
 
@@ -22,12 +23,15 @@ def is_scalar(f):
     """
     if isinstance(f, SCALARTYPES):
         return True
-    elif isinstance(f, np.ndarray) and f.size == 1 and isinstance(f.item(), SCALARTYPES):
+    elif (
+        isinstance(f, np.ndarray) and f.size == 1 and isinstance(f.item(), SCALARTYPES)
+    ):
         return True
     elif torch.is_tensor(f):
         if f.numel() == 1:
             return True
     return False
+
 
 def atleast_1d(value, dtype=None, device=None):
     """
@@ -50,6 +54,7 @@ def atleast_1d(value, dtype=None, device=None):
     if tensor.ndim == 0:
         return tensor.unsqueeze(0)
     return tensor
+
 
 def as_array_n_by_dim(pts, dim, dtype=None, device=None):
     """

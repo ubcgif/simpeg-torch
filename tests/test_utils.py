@@ -6,14 +6,14 @@ from simpegtorch.discretize.utils import (
     # sub2ind,
     # ndgrid,
     mkvc,
-    is_scalar,
+    # is_scalar,
     # inverse_2x2_block_diagonal,
     # inverse_3x3_block_diagonal,
     # inverse_property_tensor,
     # make_property_tensor,
     # index_cube,
     # ind2sub,
-    as_array_n_by_dim,
+    # as_array_n_by_dim,
     # TensorType,
     Zero,
     Identity,
@@ -27,6 +27,7 @@ from simpegtorch.discretize.utils import (
 
 TOL = 1e-8
 
+
 @pytest.fixture
 def vectors():
     return {
@@ -35,17 +36,21 @@ def vectors():
         "c": torch.tensor([1, 2, 3, 4]),
     }
 
+
 def test_mkvc1(vectors):
     x = mkvc(vectors["a"])
     assert x.shape == (3,)
+
 
 def test_mkvc2(vectors):
     x = mkvc(vectors["a"], 2)
     assert x.shape == (3, 1)
 
+
 def test_mkvc3(vectors):
     x = mkvc(vectors["a"], 3)
     assert x.shape == (3, 1, 1)
+
 
 def test_zero(vectors):
     z = Zero()
@@ -79,10 +84,12 @@ def test_zero(vectors):
     assert z.T == 0
     assert z.transpose() == 0
 
+
 def test_mat_zero():
     z = Zero()
     S = sdiag(torch.tensor([2, 3]))
     assert S * z == 0
+
 
 def test_numpy_multiply():
     z = Zero()
@@ -94,6 +101,7 @@ def test_numpy_multiply():
     x = torch.tensor([1, 2, 3])
     a = z * x
     assert isinstance(a, Zero)
+
 
 def test_one():
     o = Identity()
@@ -136,6 +144,7 @@ def test_one():
     assert o.T == 1
     assert o.transpose() == 1
 
+
 def test_mat_one():
     o = Identity()
     S = sdiag(torch.tensor([2, 3]))
@@ -157,12 +166,14 @@ def test_mat_one():
     check(S + -o, [[1, 0], [0, 2]])
     check(-o + S, [[1, 0], [0, 2]])
 
+
 def test_mat_shape():
     o = Identity()
     S = sdiag(torch.tensor([2, 3]))
 
     assert torch.all((S * o).to_dense() == S.to_dense())
     assert torch.all((S * -o).to_dense() == -S.to_dense())
+
 
 def test_torch_one():
     o = Identity()
@@ -180,6 +191,7 @@ def test_torch_one():
     assert torch.all(n * -1 == n * -o)
     assert torch.all(1 * n == o * n)
     assert torch.all(-1 * n == -o * n)
+
 
 def test_both():
     z = Zero()

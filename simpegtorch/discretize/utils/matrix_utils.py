@@ -1,5 +1,6 @@
 import torch
 
+
 def mkvc(x, n_dims=1, dtype=torch.float64, device=None):
     """
     Coerce a tensor to the specified dimensionality with column-major flattening.
@@ -66,7 +67,10 @@ def sdiag(v, dtype=torch.float64, device=None):
     indices = torch.arange(n, device=v.device).repeat(2, 1)
     values = v
 
-    return torch.sparse_coo_tensor(indices, values, (n, n), dtype=v.dtype, device=v.device)
+    return torch.sparse_coo_tensor(
+        indices, values, (n, n), dtype=v.dtype, device=v.device
+    )
+
 
 def get_diag(A):
     """
@@ -100,6 +104,7 @@ def get_diag(A):
     diag[diag_indices] = diag_values
     return diag
 
+
 def sdinv(M):
     """
     Return the inverse of a sparse diagonal matrix.
@@ -121,7 +126,7 @@ def sdinv(M):
     values = M._values()
 
     row, col = indices
-    if any (row != col):
+    if any(row != col):
         raise ValueError("Cannot invert a sparse matrix with off diagonal entries.")
 
     # Ensure all diagonal values are non-zero
@@ -129,7 +134,9 @@ def sdinv(M):
         raise ZeroDivisionError("Cannot invert a diagonal matrix with zero entries.")
 
     inv_values = 1.0 / values
-    return torch.sparse_coo_tensor(indices, inv_values, M.shape, dtype=M.dtype, device=M.device)
+    return torch.sparse_coo_tensor(
+        indices, inv_values, M.shape, dtype=M.dtype, device=M.device
+    )
 
 
 def make_boundary_bool(shape, bdir="xyz"):
@@ -161,6 +168,7 @@ def make_boundary_bool(shape, bdir="xyz"):
 
     # Flatten in Fortran order (column-major)
     return is_b.permute(*reversed(range(is_b.ndim))).reshape(-1)
+
 
 def ndgrid(*args, vector=True, order="F", dtype=torch.float64, device=None):
     """
@@ -213,6 +221,7 @@ def ndgrid(*args, vector=True, order="F", dtype=torch.float64, device=None):
         return torch.stack(flattened, dim=1)  # shape: (n, ndim)
 
     return grids
+
 
 class Zero(object):
     """Carries out arithmetic operations between 0 and arbitrary quantities.
@@ -363,6 +372,7 @@ class Zero(object):
         """Return the *Zero* class as an operator."""
         return self
 
+
 class Identity:
     """Emulates arithmetic behavior of the identity matrix."""
 
@@ -408,9 +418,16 @@ class Identity:
             if v.ndim == 1:
                 return (1.0 / v) if self._positive else (-1.0 / v)
             elif v.is_sparse:
-                return (torch.ones(v.shape[0], device=v.device, dtype=v.dtype) / v.to_dense()).to_sparse()
+                return (
+                    torch.ones(v.shape[0], device=v.device, dtype=v.dtype)
+                    / v.to_dense()
+                ).to_sparse()
             else:
-                return torch.ones_like(v) / v if self._positive else -torch.ones_like(v) / v
+                return (
+                    torch.ones_like(v) / v
+                    if self._positive
+                    else -torch.ones_like(v) / v
+                )
         return 1.0 / v if self._positive else -1.0 / v
 
     def __rtruediv__(self, v):
@@ -432,7 +449,11 @@ class Identity:
 
     def __eq__(self, v):
         val = 1 if self._positive else -1
-        return torch.equal(v, torch.tensor(val, dtype=v.dtype, device=v.device)) if torch.is_tensor(v) else v == val
+        return (
+            torch.equal(v, torch.tensor(val, dtype=v.dtype, device=v.device))
+            if torch.is_tensor(v)
+            else v == val
+        )
 
     def __req__(self, v):
         return self.__eq__(v)
@@ -476,8 +497,6 @@ class Identity:
 
         else:  # dense tensor
             return tensor + sign if op == "add" else tensor - sign
-
-
 
 
 class _inftup(tuple):
