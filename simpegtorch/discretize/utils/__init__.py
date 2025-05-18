@@ -114,8 +114,8 @@ from .matrix_utils import (
     # ddx,
     # av,
     # av_extrap,
-    # ndgrid,
-#     make_boundary_bool,
+    ndgrid,
+    make_boundary_bool,
 #     ind2sub,
 #     sub2ind,
 #     get_subarray,
@@ -128,8 +128,8 @@ from .matrix_utils import (
     Zero,
     Identity,
 )
-# from discretize.utils.mesh_utils import (
-#     unpack_widths,
+from discretize.utils.mesh_utils import (
+    unpack_widths,
 #     closest_points_index,
 #     extract_core_mesh,
 #     random_model,
@@ -137,7 +137,7 @@ from .matrix_utils import (
 #     active_from_xyz,
 #     mesh_builder_xyz,
 #     example_simplex_mesh,
-# )
+)
 # from discretize.utils.curvilinear_utils import (
 #     example_curvilinear_grid,
 #     volume_tetrahedron,
@@ -156,31 +156,3 @@ from .matrix_utils import (
 # )
 
 # from discretize.utils.io_utils import download, load_mesh
-
-# # DEPRECATIONS
-# from discretize.utils.code_utils import isScalar, asArray_N_x_Dim
-# from discretize.utils.matrix_utils import (
-#     sdInv,
-#     getSubArray,
-#     inv3X3BlockDiagonal,
-#     inv2X2BlockDiagonal,
-#     makePropertyTensor,
-#     invPropertyTensor,
-#     cross2d,
-# )
-# from discretize.utils.mesh_utils import (
-#     meshTensor,
-#     closestPoints,
-#     ExtractCoreMesh,
-# )
-# from discretize.utils.curvilinear_utils import (
-#     exampleLrmGrid,
-#     volTetra,
-#     indexCube,
-#     faceInfo,
-# )
-# from discretize.utils.interpolation_utils import interpmat
-# from discretize.utils.coordinate_utils import (
-#     rotationMatrixFromNormals,
-#     rotatePointsFromNormals,
-# )

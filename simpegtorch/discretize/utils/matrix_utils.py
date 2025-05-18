@@ -1,6 +1,6 @@
 import torch
 
-def mkvc(x, n_dims=1, dtype=None, device=None):
+def mkvc(x, n_dims=1, dtype=torch.float64, device=None):
     """
     Coerce a tensor to the specified dimensionality with column-major flattening.
 
@@ -38,7 +38,7 @@ def mkvc(x, n_dims=1, dtype=None, device=None):
     return x
 
 
-def sdiag(v, dtype=None, device=None):
+def sdiag(v, dtype=torch.float64, device=None):
     """
     Generate a sparse diagonal matrix from a vector using PyTorch.
 
@@ -131,6 +131,89 @@ def sdinv(M):
     inv_values = 1.0 / values
     return torch.sparse_coo_tensor(indices, inv_values, M.shape, dtype=M.dtype, device=M.device)
 
+
+def make_boundary_bool(shape, bdir="xyz"):
+    r"""Return boundary indices of a tensor grid using PyTorch.
+
+    Parameters
+    ----------
+    shape : tuple[int]
+        Shape of the tensor grid.
+    bdir : str
+        Which boundaries to include: any combination of 'x', 'y', and 'z'.
+
+    Returns
+    -------
+    torch.BoolTensor
+        A flattened 1D boolean tensor where True indicates a boundary location.
+    """
+
+    is_b = torch.zeros(shape, dtype=torch.bool)
+
+    if "x" in bdir:
+        is_b[[0, -1]] = True
+
+    if len(shape) > 1 and "y" in bdir:
+        is_b[:, [0, -1]] = True
+
+    if len(shape) > 2 and "z" in bdir:
+        is_b[:, :, [0, -1]] = True
+
+    # Flatten in Fortran order (column-major)
+    return is_b.permute(*reversed(range(is_b.ndim))).reshape(-1)
+
+def ndgrid(*args, vector=True, order="F", dtype=torch.float64, device=None):
+    """
+    PyTorch equivalent of numpy-based ndgrid for 1D/2D/3D Cartesian products.
+
+    Parameters
+    ----------
+    *args : list of 1D tensors or individual 1D tensors
+        Coordinate vectors (e.g., x, y, z) as separate inputs or a list.
+    vector : bool, optional
+        If True, returns an (n, ndim) stacked tensor. If False, returns a list of coordinate grids.
+    order : {'F', 'C'}
+        'F' flattens in column-major (Fortran) order, 'C' in row-major order. Default is 'F'.
+    dtype : torch.dtype
+        Data type for returned tensors.
+    device : torch.device or str
+        Device for returned tensors.
+
+    Returns
+    -------
+    torch.Tensor or list[torch.Tensor]
+        A (n, ndim) tensor or list of ndgrid tensors.
+    """
+    if not isinstance(vector, bool):
+        raise TypeError("'vector' must be a boolean")
+
+    if isinstance(args[0], list):
+        xin = args[0]
+    else:
+        xin = args
+
+    xin = [torch.as_tensor(x, dtype=dtype, device=device) for x in xin]
+
+    if len(xin) == 1:
+        return xin[0].clone()
+
+    grids = torch.meshgrid(*xin, indexing="ij")  # Fortran-style
+
+    if vector:
+        # Flatten each in desired order
+        if order == "F":
+            # Fortran order: reverse permute before reshape
+            flattened = [g.permute(*reversed(range(g.ndim))).reshape(-1) for g in grids]
+        elif order == "C":
+            # C order: just flatten normally
+            flattened = [g.reshape(-1) for g in grids]
+        else:
+            raise ValueError("order must be 'F' or 'C'")
+
+        return torch.stack(flattened, dim=1)  # shape: (n, ndim)
+
+    return grids
+
 class Zero(object):
     """Carries out arithmetic operations between 0 and arbitrary quantities.
 
@@ -140,16 +223,16 @@ class Zero(object):
 
     Examples
     --------
-    >>> import numpy as np
+    >>> import torch
     >>> from discretize.utils import Zero
     >>> Z = Zero()
     >>> Z
     Zero
-    >>> x = np.arange(5)
+    >>> x = torch.arange(5)
     >>> x + Z
-    array([0, 1, 2, 3, 4])
+    ([0, 1, 2, 3, 4])
     >>> Z - x
-    array([ 0, -1, -2, -3, -4])
+    ([ 0, -1, -2, -3, -4])
     >>> Z * x
     Zero
     >>> Z @ x
@@ -157,9 +240,6 @@ class Zero(object):
     >>> Z[0]
     Zero
     """
-
-    # __numpy_ufunc__ = True
-    # __array_ufunc__ = None
 
     def __repr__(self):
         """Represent zeros a string."""
@@ -283,18 +363,6 @@ class Zero(object):
         """Return the *Zero* class as an operator."""
         return self
 
-    @classmethod
-    def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if func.__name__ in {"add", "radd"}:
-            return args[1] if args[0] is self else args[0]
-        if func.__name__ in {"sub"}:
-            return -args[1]
-        if func.__name__ in {"rsub"}:
-            return args[0]
-        if func.__name__ in {"mul", "mm", "matmul"}:
-            return cls()
-        return NotImplemented
-
 class Identity:
     """Emulates arithmetic behavior of the identity matrix."""
 
@@ -406,105 +474,9 @@ class Identity:
         if tensor.is_sparse:
             return tensor + sign * sdiag(torch.ones(tensor.shape[0]))
 
-            # if op == "add":
-            #     new_diag = diag + sign
-            # elif op == "sub":
-            #     new_diag = diag - sign
-            # else:
-            #     raise NotImplementedError(f"Unsupported op: {op}")
-            # return sdiag(new_diag)
-
         else:  # dense tensor
             return tensor + sign if op == "add" else tensor - sign
 
-
-    # @classmethod
-    # def __torch_function__(cls, func, types, args=(), kwargs=None):
-    #     kwargs = kwargs or {}
-
-    #     identity_arg = next((a for a in args if isinstance(a, cls)), None)
-    #     if identity_arg is None:
-    #         return NotImplemented
-
-    #     pos = identity_arg._positive
-
-    #     def _safe_add(v, val):
-    #         if torch.is_tensor(v):
-    #             if v.is_sparse:
-    #                 return (v.to_dense() + val).to_sparse()
-    #             return v + val
-    #         return v + val
-
-    #     def _safe_sub(v, val):
-    #         print(f"safe sub: {v}, {val}")
-    #         if torch.is_tensor(v):
-    #             if v.is_sparse:
-    #                 return (v.to_dense() - val).to_sparse()
-    #             return v - val
-    #         return v - val
-
-    #     def _safe_neg(v):
-    #         if torch.is_tensor(v) and v.is_sparse:
-    #             return (-v.to_dense()).to_sparse()
-    #         return -v
-
-    #     def _safe_div(val, v):
-    #         if torch.is_tensor(v) and v.is_sparse:
-    #             return (torch.full_like(v.to_dense(), val) / v.to_dense()).to_sparse()
-    #         return val / v
-
-    #     if func.__name__ in {"add", "radd"}:
-    #         a, b = args
-    #         identity_on_left = isinstance(a, cls)
-    #         identity_arg = a if identity_on_left else b
-    #         pos = identity_arg._positive
-    #         tensor = b if identity_on_left else a
-
-    #         if torch.is_tensor(tensor):
-    #             if tensor.is_sparse:
-    #                 # handle sparse diagonal addition
-    #                 if torch.is_tensor(tensor) and len(tensor.shape) > 1:
-    #                     return tensor + sdiag(torch.ones(tensor.shape[0]))
-    #             else:
-    #                 return tensor + (1 if pos else -1)
-
-    #         return tensor + (1 if pos else -1)
-
-    #     if func.__name__ in {"sub", "rsub"}:
-    #         print(args)
-    #         a, b = args
-    #         if isinstance(b, cls):
-    #             tensor = a
-    #             print(f"a: {tensor}")
-    #             if torch.is_tensor(tensor) and len(tensor.shape) > 1:
-    #                 return tensor - sdiag(torch.ones(tensor.shape[0]))
-    #             return _safe_sub(tensor, 1 if pos else -1)
-    #         else:
-    #             if isinstance(a, cls):
-    #                 tensor = b
-    #                 print(f"b: {tensor}")
-    #                 if torch.is_tensor(tensor) and len(tensor.shape) > 1:
-    #                     return sdiag(torch.ones(tensor.shape[0])) - tensor
-    #             return _safe_sub(1 if pos else -1, tensor)
-
-    #     if func.__name__ in {"mul", "mm", "matmul"}:
-    #         a, b = args
-    #         other = b if isinstance(a, cls) else a
-    #         return other if pos else _safe_neg(other)
-
-    #     if func.__name__ in {"div", "truediv", "floordiv"}:
-    #         a, b = args
-    #         if isinstance(a, cls):
-    #             return _safe_div(1.0 if pos else -1.0, b)
-    #         else:
-    #             return a if pos else _safe_neg(a)
-
-    #     if func.__name__ in {"rtruediv", "rfloordiv"}:
-    #         a, b = args
-    #         if isinstance(b, cls):
-    #             return a if pos else _safe_neg(a)
-
-    #     return NotImplemented
 
 
 
