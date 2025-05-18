@@ -223,6 +223,23 @@ def ndgrid(*args, vector=True, order="F", dtype=torch.float64, device=None):
     return grids
 
 
+def sub2ind(shape, subs):
+    """Torch version of sub2ind using Fortran order."""
+    subs = torch.as_tensor(subs, dtype=torch.long)
+    shape = torch.tensor(shape, dtype=torch.long)
+    if subs.ndim == 1:
+        subs = subs.unsqueeze(0)
+    if subs.shape[1] != len(shape):
+        raise ValueError("subs must have shape (N, ndim)")
+
+    # Compute Fortran-order strides
+    strides = torch.ones_like(shape)
+    for i in range(1, len(shape)):
+        strides[i] = strides[i - 1] * shape[i - 1]
+
+    return (subs * strides).sum(dim=1)
+
+
 class Zero(object):
     """Carries out arithmetic operations between 0 and arbitrary quantities.
 

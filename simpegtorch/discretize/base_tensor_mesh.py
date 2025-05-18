@@ -1,5 +1,12 @@
 import torch
-from .utils import is_scalar, make_boundary_bool, unpack_widths, ndgrid
+from .utils import (
+    is_scalar,
+    make_boundary_bool,
+    unpack_widths,
+    ndgrid,
+    as_array_n_by_dim,
+    interpolation_matrix,
+)
 from .base import BaseRectangularMesh, BaseRegularMesh
 
 
@@ -17,7 +24,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
     Parameters
     ----------
-    h : (dim) iterable of int, numpy.ndarray, or tuple
+    h : (dim) iterable of int, torch.tensor, or tuple
         Defines the cell widths along each axis. The length of the iterable object is
         equal to the dimension of the mesh (1, 2 or 3). For a 3D mesh, the list would
         have the form *[hx, hy, hz]* .
@@ -93,7 +100,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (dim) tuple of numpy.ndarray
+        (dim) tuple of torch.tensor
             Cell widths along each axis direction. This depends on the mesh class:
 
             - :class:`~discretize.TensorMesh`: cell widths along the *x* , [*y* and *z* ] directions
@@ -133,7 +140,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_nodes_x) numpy.ndarray of float
+        (n_nodes_x) torch.tensor of float
             A 1D array containing the x-coordinates of the nodes along
             the x-direction.
 
@@ -155,7 +162,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_nodes_y) numpy.ndarray of float or None
+        (n_nodes_y) torch.tensor of float or None
             A 1D array containing the y-coordinates of the nodes along
             the y-direction. Returns *None* for 1D meshes.
 
@@ -181,7 +188,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_nodes_z) numpy.ndarray of float or None
+        (n_nodes_z) torch.tensor of float or None
             A 1D array containing the z-coordinates of the nodes along
             the z-direction. Returns *None* for 1D and 2D meshes.
 
@@ -207,7 +214,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_cells_x) numpy.ndarray of float
+        (n_cells_x) torch.tensor of float
             A 1D array containing the x-coordinates of the cell centers along
             the x-direction.
         """
@@ -229,7 +236,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_cells_y) numpy.ndarray of float or None
+        (n_cells_y) torch.tensor of float or None
             A 1D array containing the y-coordinates of the cell centers along
             the y-direction. Returns *None* for 1D meshes.
 
@@ -254,7 +261,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_cells_z) numpy.ndarray of float or None
+        (n_cells_z) torch.tensor of float or None
             A 1D array containing the z-coordinates of the cell centers along
             the z-direction. Returns *None* for 1D and 2D meshes.
 
@@ -293,7 +300,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_cells, dim) numpy.ndarray of float
+        (n_cells, dim) torch.tensor of float
             Dimensions of all mesh cells as staggered grid
 
         Examples
@@ -340,7 +347,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_faces_x, dim) numpy.ndarray of float
+        (n_faces_x, dim) torch.tensor of float
             Gridded x-face locations
         """
         if self.nFx == 0:
@@ -358,7 +365,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        n_faces_y, dim) numpy.ndarray of float or None
+        n_faces_y, dim) torch.tensor of float or None
             Gridded y-face locations for 2D and 3D mesh. Returns *None* for 1D meshes.
         """
         if self.nFy == 0 or self.dim < 2:
@@ -376,7 +383,7 @@ class BaseTensorMesh(BaseRectangularMesh):
 
         Returns
         -------
-        (n_faces_z, dim) numpy.ndarray of float or None
+        (n_faces_z, dim) torch.tensor of float or None
             Gridded z-face locations for 3D mesh. Returns *None* for 1D and 2D meshes.
         """
         if self.nFz == 0 or self.dim < 3:
@@ -464,3 +471,288 @@ class BaseTensorMesh(BaseRectangularMesh):
                 device=self.device,
             )
             return torch.cat([nx, ny, nz], dim=0)
+
+    @property
+    def edges_x(self):
+        """Gridded x-edge locations.
+
+        This property returns a numpy array of shape (n_edges_x, dim)
+        containing gridded locations for all x-edges in the mesh.
+        The first row corresponds to the bottom-front-leftmost x-edge.
+        The x-edges are ordered along the x, then y, then z directions.
+
+        Returns
+        -------
+        (n_edges_x, dim) torch.tensor of float or None
+            Gridded x-edge locations. Returns *None* if `shape_edges_x[0]` is 0.
+        """
+        if self.nEx == 0:
+            return
+        return self._getTensorGrid("edges_x")
+
+    @property
+    def edges_y(self):
+        """Gridded y-edge locations.
+
+        This property returns a numpy array of shape (n_edges_y, dim)
+        containing gridded locations for all y-edges in the mesh.
+        The first row corresponds to the bottom-front-leftmost y-edge.
+        The y-edges are ordered along the x, then y, then z directions.
+
+        Returns
+        -------
+        (n_edges_y, dim) torch.tensor of float
+            Gridded y-edge locations. Returns *None* for 1D meshes.
+        """
+        if self.nEy == 0 or self.dim < 2:
+            return
+        return self._getTensorGrid("edges_y")
+
+    @property
+    def edges_z(self):
+        """Gridded z-edge locations.
+
+        This property returns a numpy array of shape (n_edges_z, dim)
+        containing gridded locations for all z-edges in the mesh.
+        The first row corresponds to the bottom-front-leftmost z-edge.
+        The z-edges are ordered along the x, then y, then z directions.
+
+        Returns
+        -------
+        (n_edges_z, dim) torch.tensor of float
+            Gridded z-edge locations. Returns *None* for 1D and 2D meshes.
+        """
+        if self.nEz == 0 or self.dim < 3:
+            return
+        return self._getTensorGrid("edges_z")
+
+    @property
+    def edges(self):
+        """Return all edge indices stacked vertically (PyTorch version)."""
+        edges = []
+
+        if self.edges_x is not None:
+            edges.append(self.edges_x)
+        else:
+            edges.append(
+                torch.empty((0, self.dim), dtype=self.dtype, device=self.device)
+            )
+
+        if self.dim > 1 and self.edges_y is not None:
+            edges.append(self.edges_y)
+
+        if self.dim > 2 and self.edges_z is not None:
+            edges.append(self.edges_z)
+
+        return torch.cat(edges, dim=0)
+
+    @property
+    def boundary_edges(self):
+        """Boundary edge locations (PyTorch version)."""
+
+        if self.dim == 1:
+            return None  # No boundary edges in 1D
+
+        if self.dim == 2:
+            ex = ndgrid(
+                self.cell_centers_x,
+                self.nodes_y[[0, -1]],
+                dtype=self.dtype,
+                device=self.device,
+            )
+            ey = ndgrid(
+                self.nodes_x[[0, -1]],
+                self.cell_centers_y,
+                dtype=self.dtype,
+                device=self.device,
+            )
+            return torch.cat([ex, ey], dim=0)
+
+        if self.dim == 3:
+            ex = self.edges_x[make_boundary_bool(self.shape_edges_x, bdir="yz")]
+            ey = self.edges_y[make_boundary_bool(self.shape_edges_y, bdir="xz")]
+            ez = self.edges_z[make_boundary_bool(self.shape_edges_z, bdir="xy")]
+            return torch.cat([ex, ey, ez], dim=0)
+
+    def _getTensorGrid(self, key):
+        if getattr(self, "_" + key, None) is None:
+            setattr(self, "_" + key, ndgrid(self.get_tensor(key)))
+        return getattr(self, "_" + key)
+
+    def get_tensor(self, key):
+        """Return the base 1D arrays for a specified mesh tensor.
+
+        The cell-centers, nodes, x-faces, z-edges, etc... of a tensor mesh
+        can be constructed by applying tensor products to the set of base
+        1D arrays; i.e. (vx, vy, vz). These 1D arrays define the gridded
+        locations for the mesh tensor along each axis. For a given mesh tensor
+        (i.e. cell centers, nodes, x/y/z faces or x/y/z edges),
+        **get_tensor** returns a list containing the base 1D arrays.
+
+        Parameters
+        ----------
+        key : str
+            Specifies the tensor being returned. Please choose from::
+
+                'CC', 'cell_centers' -> location of cell centers
+                'N', 'nodes'         -> location of nodes
+                'Fx', 'faces_x'      -> location of faces with an x normal
+                'Fy', 'faces_y'      -> location of faces with an y normal
+                'Fz', 'faces_z'      -> location of faces with an z normal
+                'Ex', 'edges_x'      -> location of edges with an x tangent
+                'Ey', 'edges_y'      -> location of edges with an y tangent
+                'Ez', 'edges_z'      -> location of edges with an z tangent
+
+        Returns
+        -------
+        (dim) list of 1D numpy.ndarray
+            list of base 1D arrays for the tensor.
+
+        """
+        key = self._parse_location_type(key)
+
+        if key == "faces_x":
+            ten = [
+                self.nodes_x,
+                self.cell_centers_y,
+                self.cell_centers_z,
+            ]
+        elif key == "faces_y":
+            ten = [
+                self.cell_centers_x,
+                self.nodes_y,
+                self.cell_centers_z,
+            ]
+        elif key == "faces_z":
+            ten = [
+                self.cell_centers_x,
+                self.cell_centers_y,
+                self.nodes_z,
+            ]
+        elif key == "edges_x":
+            ten = [self.cell_centers_x, self.nodes_y, self.nodes_z]
+        elif key == "edges_y":
+            ten = [self.nodes_x, self.cell_centers_y, self.nodes_z]
+        elif key == "edges_z":
+            ten = [self.nodes_x, self.nodes_y, self.cell_centers_z]
+        elif key == "cell_centers":
+            ten = [
+                self.cell_centers_x,
+                self.cell_centers_y,
+                self.cell_centers_z,
+            ]
+        elif key == "nodes":
+            ten = [self.nodes_x, self.nodes_y, self.nodes_z]
+        else:
+            raise KeyError(r"Unrecognized key {key}")
+
+        return [t for t in ten if t is not None]
+
+    def is_inside(self, pts, location_type="nodes", tol=1e-10):
+        """Determine which points lie within the mesh (PyTorch version)."""
+
+        pts = as_array_n_by_dim(pts, self.dim)
+        pts = torch.as_tensor(pts, dtype=self.dtype, device=self.device)
+
+        tensors = self.get_tensor(location_type)
+
+        if location_type[0].lower() == "n" and self._meshType == "CYL":
+            # Add a node at the origin in R, and wrap-around in theta
+            tensors[0] = torch.cat(
+                [torch.tensor([0.0], dtype=self.dtype, device=self.device), tensors[0]]
+            )
+            tensors[1] = torch.cat(
+                [
+                    tensors[1],
+                    torch.tensor(
+                        [2.0 * torch.pi], dtype=self.dtype, device=self.device
+                    ),
+                ]
+            )
+
+        inside = torch.ones(pts.shape[0], dtype=torch.bool, device=self.device)
+
+        for i, tensor in enumerate(tensors):
+            diffs = torch.diff(tensor)
+            TOL = diffs.min() * tol
+            inside &= (pts[:, i] >= tensor.min() - TOL) & (
+                pts[:, i] <= tensor.max() + TOL
+            )
+
+        return inside
+
+    def _get_interpolation_matrix(
+        self, loc, location_type="cell_centers", zeros_outside=False
+    ):
+        loc = as_array_n_by_dim(loc, self.dim)
+        loc = torch.as_tensor(loc, dtype=self.dtype, device=self.device)
+
+        if not zeros_outside:
+            if not torch.all(self.is_inside(loc)):
+                raise ValueError("Points outside of mesh")
+        else:
+            ind_zeros = ~self.is_inside(loc)
+            loc = loc.clone()
+            loc[ind_zeros] = torch.stack(
+                [v.mean() for v in self.get_tensor("CC")]
+            ).view(1, -1)
+
+        location_type = self._parse_location_type(location_type)
+
+        if location_type in [
+            "faces_x",
+            "faces_y",
+            "faces_z",
+            "edges_x",
+            "edges_y",
+            "edges_z",
+        ]:
+            ind = {"x": 0, "y": 1, "z": 2}[location_type[-1]]
+            if self.dim <= ind:
+                raise ValueError("mesh is not high enough dimension.")
+            if "f" in location_type.lower():
+                counts = (self.nFx, self.nFy, self.nFz)[: self.dim]
+            else:
+                counts = (self.nEx, self.nEy, self.nEz)[: self.dim]
+
+            components = []
+            for i, n in enumerate(counts):
+                if i == ind:
+                    interp = interpolation_matrix(
+                        loc, *self.get_tensor(location_type)
+                    )  # should return torch.sparse_coo_tensor
+                else:
+                    interp = torch.sparse_coo_tensor(
+                        size=(loc.shape[0], n), dtype=self.dtype, device=self.device
+                    )
+                components.append(interp)
+
+            # concatenate sparse tensors horizontally
+            Q = torch.cat([comp.to_dense() for comp in components], dim=1).to_sparse()
+
+        elif location_type in ["cell_centers", "nodes"]:
+            Q = interpolation_matrix(loc, *self.get_tensor(location_type))
+
+        elif location_type in ["cell_centers_x", "cell_centers_y", "cell_centers_z"]:
+            Q_base = interpolation_matrix(loc, *self.get_tensor("CC"))
+            Z = torch.zeros_like(Q_base)
+            if location_type.endswith("x"):
+                Q = torch.cat([Q_base, Z, Z], dim=1)
+            elif location_type.endswith("y"):
+                Q = torch.cat([Z, Q_base, Z], dim=1)
+            elif location_type.endswith("z"):
+                Q = torch.cat([Z, Z, Q_base], dim=1)
+            Q = Q.to_sparse()
+
+        else:
+            raise NotImplementedError(
+                f"get_interpolation_matrix: location_type={location_type} and mesh.dim={self.dim}"
+            )
+
+        if zeros_outside:
+            # Remove contributions for points outside
+            Q_dense = Q.to_dense()
+            Q_dense[ind_zeros] = 0
+            Q = Q_dense.to_sparse()
+
+        return Q

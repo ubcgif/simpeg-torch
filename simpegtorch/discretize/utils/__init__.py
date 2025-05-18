@@ -117,7 +117,7 @@ from .matrix_utils import (
     ndgrid,
     make_boundary_bool,
     #     ind2sub,
-    #     sub2ind,
+    sub2ind,
     #     get_subarray,
     #     inverse_3x3_block_diagonal,
     #     inverse_2x2_block_diagonal,
@@ -145,7 +145,8 @@ from discretize.utils.mesh_utils import (
 #     face_info,
 #     index_cube,
 # )
-# from discretize.utils.interpolation_utils import interpolation_matrix, volume_average
+from discretize.utils.interpolation_utils import interpolation_matrix, volume_average
+
 # from discretize.utils.coordinate_utils import (
 #     rotate_points_from_normals,
 #     rotation_matrix_from_normals,
