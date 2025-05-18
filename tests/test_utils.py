@@ -70,19 +70,21 @@ def test_zero(self):
     a = 1
     a += z
     assert a == 1
-    self.assertRaises(ZeroDivisionError, lambda: 3 / z)
+
+    with pytest.raises(ZeroDivisionError):
+        3 / z
 
     assert mkvc(z) == 0
     assert sdiag(z) * a == 0
     assert z.T == 0
     assert z.transpose() == 0
 
-def test_mat_zero(self):
+def test_mat_zero():
     z = Zero()
     S = sdiag(torch.tensor([2, 3]))
     assert S * z == 0
 
-def test_numpy_multiply(self):
+def test_numpy_multiply():
     z = Zero()
     x = torch.tensor([1, 2, 3])
     a = x * z
@@ -93,7 +95,7 @@ def test_numpy_multiply(self):
     a = z * x
     assert isinstance(a, Zero)
 
-def test_one(self):
+def test_one():
     o = Identity()
     assert o == 1
     assert not (o < 1)
@@ -134,7 +136,7 @@ def test_one(self):
     assert o.T == 1
     assert o.transpose() == 1
 
-def test_mat_one(self):
+def test_mat_one():
     o = Identity()
     S = sdiag(torch.tensor([2, 3]))
 
@@ -147,7 +149,9 @@ def test_mat_one(self):
     check(-o * S, [[-2, 0], [0, -3]])
     check(S / o, [[2, 0], [0, 3]])
     check(S / -o, [[-2, 0], [0, -3]])
-    self.assertRaises(NotImplementedError, lambda: o / S)
+
+    with pytest.raises(NotImplementedError):
+        o / S
 
     check(S + o, [[3, 0], [0, 4]])
     check(o + S, [[3, 0], [0, 4]])
@@ -156,10 +160,11 @@ def test_mat_one(self):
     check(S + -o, [[1, 0], [0, 2]])
     check(-o + S, [[1, 0], [0, 2]])
 
-def test_mat_shape(self):
+def test_mat_shape():
     o = Identity()
     S = sdiag(torch.tensor([2, 3]))[:1, :]
-    self.assertRaises(ValueError, lambda: S + o)
+    with pytest.raises(ValueError):
+        S + o
 
     def check(exp, ans):
         assert torch.all((exp).todense() == ans)
@@ -167,7 +172,7 @@ def test_mat_shape(self):
     check(S * o, [[2, 0]])
     check(S * -o, [[-2, 0]])
 
-def test_numpy_one(self):
+def test_numpy_one():
     o = Identity()
     n = torch.tensor([2.0, 3])
 
@@ -184,7 +189,7 @@ def test_numpy_one(self):
     assert torch.all(1 * n == o * n)
     assert torch.all(-1 * n == -o * n)
 
-def test_both(self):
+def test_both():
     z = Zero()
     o = Identity()
     assert o * z == 0
