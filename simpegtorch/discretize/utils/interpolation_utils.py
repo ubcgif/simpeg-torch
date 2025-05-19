@@ -38,7 +38,18 @@ def interpolation_matrix(locs, x, y=None, z=None, dtype=torch.float64, device=No
         inds, vals = _interpmat3D(locs, x, y, z)
 
     I = torch.repeat_interleave(torch.arange(npts, device=device), 2 ** len(shape))
-    J = sub2ind(shape, inds)
+    if isinstance(inds, tuple):
+        # Tuple of index tensors → stack and transpose
+        subs = torch.stack(inds, dim=0).T  # (N, ndim)
+    elif inds.ndim == 2:
+        # Already 2D tensor → just transpose
+        subs = inds.T
+    elif inds.ndim == 1:
+        # Single 1D tensor → unsqueeze to get (N, 1)
+        subs = inds.unsqueeze(1)
+    else:
+        raise ValueError(f"Unexpected inds shape: {inds.shape}")
+    J = sub2ind(shape, subs)
     Q = torch.sparse_coo_tensor(
         indices=torch.stack([I, J]),
         values=vals,
@@ -64,6 +75,37 @@ def _interp_point_1D(x, xp):
     return i1, i2, w1, w2
 
 
+def _get_inds_ws(x, xp):
+    """
+    Get indices and interpolation weights for value `xp` within a sorted 1D tensor `x`.
+
+    Returns
+    -------
+    i1, i2 : int
+        Indices of neighboring values in `x`.
+    w1, w2 : float
+        Linear interpolation weights.
+    """
+    nx = x.numel()
+
+    # Binary search to find index where xp would go
+    i2 = torch.searchsorted(x, torch.tensor([xp]), right=True).item()
+    i1 = i2 - 1
+
+    # Clamp to bounds
+    i2 = max(min(i2, nx - 1), 0)
+    i1 = max(min(i1, nx - 1), 0)
+
+    if i1 == i2:
+        w1 = 0.5
+    else:
+        denom = x[i2] - x[i1]
+        w1 = (x[i2] - xp) / denom
+    w2 = 1.0 - w1
+
+    return i1, i2, w1.item(), w2
+
+
 def _interpmat1D(locs, x):
     """Generate indices and weights for 1D interpolation."""
     npts = locs.numel()
@@ -71,7 +113,7 @@ def _interpmat1D(locs, x):
     vals = torch.empty(npts * 2, dtype=locs.dtype, device=locs.device)
 
     for i in range(npts):
-        i1, i2, w1, w2 = _interp_point_1D(x, locs[i].item())
+        i1, i2, w1, w2 = _get_inds_ws(x, locs[i].item())
         inds[2 * i] = i1
         inds[2 * i + 1] = i2
         vals[2 * i] = w1
@@ -87,8 +129,8 @@ def _interpmat2D(locs, x, y):
     vals = torch.empty(npts * 4, dtype=locs.dtype, device=locs.device)
 
     for i in range(npts):
-        xi1, xi2, wx1, wx2 = _interp_point_1D(x, locs[i, 0].item())
-        yi1, yi2, wy1, wy2 = _interp_point_1D(y, locs[i, 1].item())
+        xi1, xi2, wx1, wx2 = _get_inds_ws(x, locs[i, 0].item())
+        yi1, yi2, wy1, wy2 = _get_inds_ws(y, locs[i, 1].item())
 
         inds[4 * i + 0] = torch.tensor([xi1, yi1], device=locs.device)
         inds[4 * i + 1] = torch.tensor([xi1, yi2], device=locs.device)
@@ -110,9 +152,9 @@ def _interpmat3D(locs, x, y, z):
     vals = torch.empty(npts * 8, dtype=locs.dtype, device=locs.device)
 
     for i in range(npts):
-        xi1, xi2, wx1, wx2 = _interp_point_1D(x, locs[i, 0].item())
-        yi1, yi2, wy1, wy2 = _interp_point_1D(y, locs[i, 1].item())
-        zi1, zi2, wz1, wz2 = _interp_point_1D(z, locs[i, 2].item())
+        xi1, xi2, wx1, wx2 = _get_inds_ws(x, locs[i, 0].item())
+        yi1, yi2, wy1, wy2 = _get_inds_ws(y, locs[i, 1].item())
+        zi1, zi2, wz1, wz2 = _get_inds_ws(z, locs[i, 2].item())
 
         inds[8 * i + 0] = torch.tensor([xi1, yi1, zi1], device=locs.device)
         inds[8 * i + 1] = torch.tensor([xi1, yi2, zi1], device=locs.device)

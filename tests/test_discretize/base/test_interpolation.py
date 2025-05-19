@@ -10,11 +10,11 @@ def call1(fun, xyz):
 
 
 def call2(fun, xyz):
-    fun(xyz[:, 0], xyz[:, -1])
+    return fun(xyz[:, 0], xyz[:, -1])
 
 
 def call3(fun, xyz):
-    fun(xyz[:, 0], xyz[:, 1], xyz[:, 2])
+    return fun(xyz[:, 0], xyz[:, 1], xyz[:, 2])
 
 
 def cart_row2(g, xfun, yfun):
@@ -81,7 +81,7 @@ class TestInterpolation1D(OrderTest):
 
     def getError(self):
         def funX(x):
-            torch.cos(2 * torch.pi * x)
+            return torch.cos(2 * torch.pi * x)
 
         ana = call1(funX, self.LOCS)
 
@@ -90,9 +90,9 @@ class TestInterpolation1D(OrderTest):
         elif "N" == self.type:
             grid = call1(funX, self.M.nodes)
 
-        comp = self.M.get_interpolation_matrix(self.LOCS, self.type) * grid
+        comp = self.M.get_interpolation_matrix(self.LOCS, self.type) @ grid
 
-        err = torch.linalg.norm((comp - ana), 2)
+        err = torch.linalg.norm((ana - comp), 2)
         return err
 
     def test_orderCC(self):
