@@ -1,6 +1,6 @@
 import torch
 
-from .matrix_utils import sub2ind
+from .matrix_utils import sub2ind, mkvc
 
 
 def interpolation_matrix(locs, x, y=None, z=None, dtype=torch.float64, device=None):
@@ -21,25 +21,23 @@ def interpolation_matrix(locs, x, y=None, z=None, dtype=torch.float64, device=No
     """
     locs = locs.to(dtype=dtype, device=device)
     x = x.to(dtype=dtype, device=device)
-    dim = locs.shape[1]
+    # dim = locs.shape[1]
     npts = locs.shape[0]
 
-    if dim == 1:
+    if y is None and z is None:
         shape = [x.size(0)]
-        inds, vals = _interpmat1D(locs.view(-1), x)
-    elif dim == 2:
+        inds, vals = _interpmat1D(mkvc(locs), x)
+    elif z is None:
         y = y.to(dtype=dtype, device=device)
         shape = [x.size(0), y.size(0)]
         inds, vals = _interpmat2D(locs, x, y)
-    elif dim == 3:
+    else:
         y = y.to(dtype=dtype, device=device)
         z = z.to(dtype=dtype, device=device)
         shape = [x.size(0), y.size(0), z.size(0)]
         inds, vals = _interpmat3D(locs, x, y, z)
-    else:
-        raise ValueError("locs must be 1D, 2D or 3D")
 
-    I = torch.repeat_interleave(torch.arange(npts, device=device), 2**dim)
+    I = torch.repeat_interleave(torch.arange(npts, device=device), 2 ** len(shape))
     J = sub2ind(shape, inds)
     Q = torch.sparse_coo_tensor(
         indices=torch.stack([I, J]),

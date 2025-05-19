@@ -120,7 +120,7 @@ from .matrix_utils import (
     # av_extrap,
     ndgrid,
     make_boundary_bool,
-    #     ind2sub,
+    ind2sub,
     sub2ind,
     #     get_subarray,
     #     inverse_3x3_block_diagonal,

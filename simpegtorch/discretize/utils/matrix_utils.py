@@ -247,6 +247,36 @@ def sub2ind(shape, subs):
     return (subs * strides).sum(dim=1)
 
 
+def ind2sub(shape, inds, dtype=torch.int64, device=None):
+    r"""Return subscripts of tensor grid elements from indices using Fortran order.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape of the tensor (Fortran order assumed).
+    inds : array-like of int
+        Flattened indices into the tensor.
+
+    Returns
+    -------
+    tuple of torch.Tensor
+        Subscript tensors for each dimension, matching Fortran-order unraveling.
+    """
+    shape = torch.tensor(shape, dtype=torch.long)
+    inds = torch.as_tensor(inds, dtype=torch.long).flatten()
+
+    strides = [1]
+    for s in shape[:-1]:
+        strides.append(strides[-1] * s)
+    strides = torch.tensor(strides, dtype=torch.long)
+
+    subs = []
+    for stride, dim_size in zip(strides, shape):
+        subs.append((inds // stride) % dim_size)
+
+    return tuple(subs)
+
+
 class Zero(object):
     """Carries out arithmetic operations between 0 and arbitrary quantities.
 

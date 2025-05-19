@@ -1,19 +1,20 @@
 import torch
+import numpy as np
 import pytest
 
 from simpegtorch.discretize.utils import (
     sdiag,
-    # sub2ind,
-    # ndgrid,
+    sub2ind,
+    ndgrid,
     mkvc,
-    # is_scalar,
+    is_scalar,
     # inverse_2x2_block_diagonal,
     # inverse_3x3_block_diagonal,
     # inverse_property_tensor,
     # make_property_tensor,
     # index_cube,
-    # ind2sub,
-    # as_array_n_by_dim,
+    ind2sub,
+    as_array_n_by_dim,
     # TensorType,
     Zero,
     Identity,
@@ -50,6 +51,88 @@ def test_mkvc2(vectors):
 def test_mkvc3(vectors):
     x = mkvc(vectors["a"], 3)
     assert x.shape == (3, 1, 1)
+
+
+def test_ndgrid_3D():
+    a = torch.tensor([1, 2, 3])
+    b = torch.tensor([1, 2])
+    c = torch.tensor([1, 2, 3, 4])
+
+    XYZ = ndgrid([a, b, c])  # Make sure this returns a Fortran-stacked grid
+
+    X1_test = torch.tensor(
+        [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3]
+    )
+    X2_test = torch.tensor(
+        [1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2]
+    )
+    X3_test = torch.tensor(
+        [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4]
+    )
+
+    assert torch.all(XYZ[:, 0] == X1_test)
+    assert torch.all(XYZ[:, 1] == X2_test)
+    assert torch.all(XYZ[:, 2] == X3_test)
+
+
+def test_sub2ind():
+    x = torch.ones((5, 2))
+    assert torch.all(sub2ind(x.shape, [0, 0]) == torch.tensor([0]))
+    assert torch.all(sub2ind(x.shape, [4, 0]) == torch.tensor([4]))
+    assert torch.all(sub2ind(x.shape, [0, 1]) == torch.tensor([5]))
+    assert torch.all(sub2ind(x.shape, [4, 1]) == torch.tensor([9]))
+    assert torch.all(sub2ind(x.shape, [[4, 1]]) == torch.tensor([9]))
+    assert torch.all(
+        sub2ind(x.shape, [[0, 0], [4, 0], [0, 1], [4, 1]]) == torch.tensor([0, 4, 5, 9])
+    )
+
+
+def test_ind2sub():
+    x = torch.ones((5, 2))
+    i, j = ind2sub(x.shape, [0, 4, 5, 9])
+    assert torch.all(i == torch.tensor([0, 4, 0, 4]))
+    assert torch.all(j == torch.tensor([0, 0, 1, 1]))
+
+
+def test_is_scalar():
+    assert is_scalar(1.0)
+    assert is_scalar(1)
+    assert is_scalar(1j)
+    assert is_scalar(np.array(1.0))
+    assert is_scalar(np.array(1))
+    assert is_scalar(np.array(1j))
+    assert is_scalar(np.array([1.0]))
+    assert is_scalar(np.array([1]))
+    assert is_scalar(np.array([1j]))
+    assert is_scalar(np.array([[1.0]]))
+    assert is_scalar(np.array([[1]]))
+    assert is_scalar(np.array([[1j]]))
+
+    assert is_scalar(torch.tensor(1.0))
+    assert is_scalar(torch.tensor(1))
+    assert is_scalar(torch.tensor([1.0]))
+    assert is_scalar(torch.tensor([[1.0]]))
+
+
+def test_as_array_n_by_dim():
+    true = torch.tensor([[1.0, 2.0, 3.0]])
+
+    list_array = as_array_n_by_dim([1, 2, 3], 3)
+    assert torch.allclose(true - list_array, torch.zeros(len(true)))
+    assert true.shape == list_array.shape
+
+    list_array = as_array_n_by_dim(torch.tensor([1, 2, 3]), 3)
+    assert torch.allclose(true - list_array, torch.zeros(len(true)))
+    assert true.shape == list_array.shape
+
+    list_array = as_array_n_by_dim(torch.tensor([[1, 2, 3.0]]), 3)
+    assert torch.allclose(true - list_array, torch.zeros(len(true)))
+    assert true.shape == list_array.shape
+
+    true = torch.tensor([[1.0, 2.0], [4.0, 5.0]])
+    list_array = as_array_n_by_dim([[1, 2], [4, 5]], 2)
+    assert torch.allclose(true - list_array, torch.zeros(len(true)))
+    assert true.shape == list_array.shape
 
 
 def test_zero(vectors):
