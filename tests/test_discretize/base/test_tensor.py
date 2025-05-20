@@ -85,7 +85,6 @@ def test_area_2D(setup_meshes):
             1,
             1,
         ],
-        dtype=torch.float64,
     )
     assert torch.all(mesh2.face_areas == test_area)
 
@@ -147,20 +146,19 @@ def test_area_3D(setup_meshes):
             2,
             2,
         ],
-        dtype=torch.float64,
     )
     assert torch.all(mesh3.face_areas == test_area)
 
 
 def test_vol_3D(setup_meshes):
     _, mesh3 = setup_meshes
-    test_vol = torch.tensor([1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 8], dtype=torch.float64)
+    test_vol = torch.tensor([1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 8])
     assert torch.all(mesh3.cell_volumes == test_vol)
 
 
 def test_vol_2D(setup_meshes):
     mesh2, _ = setup_meshes
-    test_vol = torch.tensor([1, 1, 1, 2, 2, 2], dtype=torch.float64)
+    test_vol = torch.tensor([1, 1, 1, 2, 2, 2])
     assert torch.all(mesh2.cell_volumes == test_vol)
 
 
@@ -244,58 +242,55 @@ def test_edge_3D(setup_meshes):
             4,
             4,
         ],
-        dtype=torch.float64,
     )
     assert torch.all(mesh3.edge_lengths == test_edge)
 
 
 def test_edge_2D(setup_meshes):
     mesh2, _ = setup_meshes
-    test_edge = torch.tensor(
-        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2], dtype=torch.float64
-    )
+    test_edge = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2])
     assert torch.all(mesh2.edge_lengths == test_edge)
 
 
 def test_oneCell():
-    hx = torch.tensor([1e-5], dtype=torch.float64)
+    hx = torch.tensor([1e-5])
     M = discretize.TensorMesh([hx])
     assert M.n_cells == 1
 
 
 def test_printing():
-    print(discretize.TensorMesh([10], dtype=torch.float64))
-    print(discretize.TensorMesh([10, 10], dtype=torch.float64))
-    print(discretize.TensorMesh([10, 10, 10], dtype=torch.float64))
+    print(discretize.TensorMesh([10]))
+    print(discretize.TensorMesh([10, 10]))
+    print(discretize.TensorMesh([10, 10, 10]))
 
 
 def test_centering():
-    M1d = discretize.TensorMesh([10], origin="C", dtype=torch.float64)
-    M2d = discretize.TensorMesh([10, 10], origin="CC", dtype=torch.float64)
-    M3d = discretize.TensorMesh([10, 10, 10], origin="CCC", dtype=torch.float64)
+    M1d = discretize.TensorMesh([10], origin="C")
+    M2d = discretize.TensorMesh([10, 10], origin="CC")
+    M3d = discretize.TensorMesh([10, 10, 10], origin="CCC")
     assert torch.abs(M1d.origin + 0.5).sum() < TOL
     assert torch.abs(M2d.origin + 0.5).sum() < TOL
     assert torch.abs(M3d.origin + 0.5).sum() < TOL
 
 
 def test_negative():
-    M1d = discretize.TensorMesh([10], origin="N", dtype=torch.float64)
+    M1d = discretize.TensorMesh([10], origin="N")
     with pytest.raises(Exception):
         discretize.TensorMesh([10], "F")
-    M2d = discretize.TensorMesh([10, 10], origin="NN", dtype=torch.float64)
-    M3d = discretize.TensorMesh([10, 10, 10], origin="NNN", dtype=torch.float64)
+    M2d = discretize.TensorMesh([10, 10], origin="NN")
+    M3d = discretize.TensorMesh([10, 10, 10], origin="NNN")
     assert torch.abs(M1d.origin + 1.0).sum() < TOL
     assert torch.abs(M2d.origin + 1.0).sum() < TOL
     assert torch.abs(M3d.origin + 1.0).sum() < TOL
 
 
 def test_cent_neg():
-    M3d = discretize.TensorMesh([10, 10, 10], origin="C0N", dtype=torch.float64)
+    M3d = discretize.TensorMesh([10, 10, 10], origin="C0N")
     assert torch.abs(M3d.origin + torch.tensor([0.5, 0.0, 1.0])).sum() < TOL
 
 
 def test_tensor():
-    M = discretize.TensorMesh([[(10.0, 2)]], dtype=torch.float64)
+    M = discretize.TensorMesh([[(10.0, 2)]])
     assert torch.abs(M.h[0] - torch.tensor([10.0, 10.0])).sum() < TOL
 
 

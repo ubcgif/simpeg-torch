@@ -4,6 +4,8 @@ from simpegtorch.discretize.tests import OrderTest
 MESHTYPES = ["uniformTensorMesh", "randomTensorMesh"]
 TOLERANCES = [0.9, 0.5, 0.5]
 
+torch.set_default_dtype(torch.float64)
+
 
 def call1(fun, xyz):
     return fun(xyz)

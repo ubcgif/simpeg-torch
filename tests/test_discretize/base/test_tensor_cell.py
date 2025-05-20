@@ -3,6 +3,8 @@ import torch
 from simpegtorch.discretize import TensorCell
 from simpegtorch.discretize.tensor_mesh import _slice_to_index
 
+torch.set_default_dtype(torch.float64)
+
 
 @pytest.mark.parametrize(
     "slice_indices, expected_result",
@@ -51,11 +53,11 @@ class TestTensorCell:
 
     def test_center(self, cell):
         if cell.dim == 1:
-            true_center = torch.tensor([0.0], dtype=torch.float64)
+            true_center = torch.tensor([0.0])
         elif cell.dim == 2:
-            true_center = torch.tensor([0.0, 6.0], dtype=torch.float64)
+            true_center = torch.tensor([0.0, 6.0])
         elif cell.dim == 3:
-            true_center = torch.tensor([0.0, 6.0, -7.0], dtype=torch.float64)
+            true_center = torch.tensor([0.0, 6.0, -7.0])
         assert torch.allclose(cell.center, true_center)
 
     def test_index(self, cell):
@@ -78,13 +80,11 @@ class TestTensorCell:
 
     def test_bounds(self, cell):
         if cell.dim == 1:
-            true_bounds = torch.tensor([-2.0, 2.0], dtype=torch.float64)
+            true_bounds = torch.tensor([-2.0, 2.0])
         elif cell.dim == 2:
-            true_bounds = torch.tensor([-2.0, 2.0, 5.0, 7.0], dtype=torch.float64)
+            true_bounds = torch.tensor([-2.0, 2.0, 5.0, 7.0])
         elif cell.dim == 3:
-            true_bounds = torch.tensor(
-                [-2.0, 2.0, 5.0, 7.0, -12.0, -2.0], dtype=torch.float64
-            )
+            true_bounds = torch.tensor([-2.0, 2.0, 5.0, 7.0, -12.0, -2.0])
         assert torch.allclose(cell.bounds, true_bounds)
 
     @pytest.mark.parametrize("change_h", (True, False))
