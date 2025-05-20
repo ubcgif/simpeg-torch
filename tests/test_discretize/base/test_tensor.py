@@ -263,38 +263,38 @@ def test_oneCell():
 
 
 def test_printing():
-    print(discretize.TensorMesh([10]))
-    print(discretize.TensorMesh([10, 10]))
-    print(discretize.TensorMesh([10, 10, 10]))
+    print(discretize.TensorMesh([10], dtype=torch.float64))
+    print(discretize.TensorMesh([10, 10], dtype=torch.float64))
+    print(discretize.TensorMesh([10, 10, 10], dtype=torch.float64))
 
 
 def test_centering():
-    M1d = discretize.TensorMesh([10], origin="C")
-    M2d = discretize.TensorMesh([10, 10], origin="CC")
-    M3d = discretize.TensorMesh([10, 10, 10], origin="CCC")
+    M1d = discretize.TensorMesh([10], origin="C", dtype=torch.float64)
+    M2d = discretize.TensorMesh([10, 10], origin="CC", dtype=torch.float64)
+    M3d = discretize.TensorMesh([10, 10, 10], origin="CCC", dtype=torch.float64)
     assert torch.abs(M1d.origin + 0.5).sum() < TOL
     assert torch.abs(M2d.origin + 0.5).sum() < TOL
     assert torch.abs(M3d.origin + 0.5).sum() < TOL
 
 
 def test_negative():
-    M1d = discretize.TensorMesh([10], origin="N")
+    M1d = discretize.TensorMesh([10], origin="N", dtype=torch.float64)
     with pytest.raises(Exception):
         discretize.TensorMesh([10], "F")
-    M2d = discretize.TensorMesh([10, 10], origin="NN")
-    M3d = discretize.TensorMesh([10, 10, 10], origin="NNN")
+    M2d = discretize.TensorMesh([10, 10], origin="NN", dtype=torch.float64)
+    M3d = discretize.TensorMesh([10, 10, 10], origin="NNN", dtype=torch.float64)
     assert torch.abs(M1d.origin + 1.0).sum() < TOL
     assert torch.abs(M2d.origin + 1.0).sum() < TOL
     assert torch.abs(M3d.origin + 1.0).sum() < TOL
 
 
 def test_cent_neg():
-    M3d = discretize.TensorMesh([10, 10, 10], origin="C0N")
+    M3d = discretize.TensorMesh([10, 10, 10], origin="C0N", dtype=torch.float64)
     assert torch.abs(M3d.origin + torch.tensor([0.5, 0.0, 1.0])).sum() < TOL
 
 
 def test_tensor():
-    M = discretize.TensorMesh([[(10.0, 2)]])
+    M = discretize.TensorMesh([[(10.0, 2)]], dtype=torch.float64)
     assert torch.abs(M.h[0] - torch.tensor([10.0, 10.0])).sum() < TOL
 
 
