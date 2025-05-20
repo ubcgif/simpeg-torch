@@ -6,6 +6,7 @@ from simpegtorch import discretize
 TOL = 1e-10
 
 gen = torch.Generator().manual_seed(123)
+torch.set_default_dtype(torch.float64)
 
 
 @pytest.fixture(scope="module")
