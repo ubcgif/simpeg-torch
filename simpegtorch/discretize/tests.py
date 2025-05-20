@@ -111,6 +111,11 @@ def assert_expected_order(
     nc = n_cells[0].item()
     err_last, h_last = func(nc)
 
+    if not isinstance(err_last, torch.Tensor):
+        err_last = torch.tensor(err_last)
+    if not isinstance(h_last, torch.Tensor):
+        h_last = torch.tensor(h_last)
+
     print("_______________________________________________________")
     print("  nc  |    h    |    error    | e(i-1)/e(i) |  order   ")
     print("~~~~~~|~~~~~~~~~|~~~~~~~~~~~~~|~~~~~~~~~~~~~|~~~~~~~~~~")
@@ -119,9 +124,13 @@ def assert_expected_order(
     for nc in n_cells[1:]:
         nc = nc.item()
         err, h = func(nc)
-        order = torch.log(torch.tensor(err / err_last)) / torch.log(
-            torch.tensor(h / h_last)
-        )
+
+        if not isinstance(err, torch.Tensor):
+            err = torch.tensor(err)
+        if not isinstance(h, torch.Tensor):
+            h = torch.tensor(h)
+
+        order = torch.log(err / err_last) / torch.log(h / h_last)
         ratio = err_last / err
         print(f"{nc:^6d}|{h:^9.2e}|{err:^13.3e}|{ratio:^13.4f}|{order.item():^10.4f}")
         err_last = err

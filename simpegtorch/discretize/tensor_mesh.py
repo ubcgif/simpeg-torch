@@ -5,7 +5,7 @@ from .base import BaseTensorMesh, BaseRectangularMesh
 # from .operators import DiffOperators, InnerProducts
 # from .mixins import InterfaceMixins, TensorMeshIO
 from .utils import mkvc
-import numpy as np
+
 
 class TensorMesh(
     # DiffOperators,
