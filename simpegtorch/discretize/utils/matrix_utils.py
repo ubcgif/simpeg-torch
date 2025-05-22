@@ -312,6 +312,89 @@ def av(n, dtype=torch.float64, device=None, sparse_type="coo"):
         return output
 
 
+def av_extrap(n, dtype=torch.float64, device=None, sparse_type="coo"):
+    r"""Create 1D averaging operator from cell-centers to nodes.
+
+    For n cells, the 1D averaging operator from cell centers to nodes
+    is sparse and has shape (n+1, n). Values at the outmost nodes are
+    extrapolated from the nearest cell center value. Thus the operator
+    takes the form:
+
+    .. math::
+        \begin{bmatrix}
+        1 & & & & \\
+        1/2 & 1/2 & & & \\
+        & 1/2 & 1/2 & & & \\
+        & & \ddots & \ddots & \\
+        & & & 1/2 & 1/2 \\
+        & & & & 1
+        \end{bmatrix}
+
+    Parameters
+    ----------
+    n : int
+        Number of cells
+    dtype : torch.dtype, optional
+        Data type of the tensor.
+    device : torch.device, optional
+        Device to store the tensor on.
+    sparse_type : {'coo', 'csr'}, optional
+        Output sparse format.
+
+    Returns
+    -------
+    torch.sparse.Tensor
+        The 1D averaging operator from cell-centers to nodes with shape (n+1, n).
+    """
+    if n < 1:
+        raise ValueError("Number of cells must be at least 1")
+
+    # Handle special case of n=1
+    if n == 1:
+        row_indices = torch.tensor([0, 1], dtype=torch.long, device=device)
+        col_indices = torch.tensor([0, 0], dtype=torch.long, device=device)
+        values = torch.tensor([1.0, 1.0], dtype=dtype, device=device)
+    else:
+        # Row indices for different parts of the matrix
+        # First row (extrapolation): row 0, column 0, value 1
+        first_row_idx = torch.tensor([0], dtype=torch.long, device=device)
+        first_col_idx = torch.tensor([0], dtype=torch.long, device=device)
+        first_values = torch.tensor([1.0], dtype=dtype, device=device)
+
+        # Middle rows (averaging): rows 1 to n-1
+        # Each row i has entries at columns i-1 and i with value 0.5
+        middle_rows = torch.arange(1, n, dtype=torch.long, device=device)
+        middle_row_indices = middle_rows.repeat(2)  # Each row appears twice
+        middle_col_indices = torch.cat(
+            [
+                torch.arange(0, n - 1, dtype=torch.long, device=device),  # columns i-1
+                torch.arange(1, n, dtype=torch.long, device=device),  # columns i
+            ]
+        )
+        middle_values = 0.5 * torch.ones(2 * (n - 1), dtype=dtype, device=device)
+
+        # Last row (extrapolation): row n, column n-1, value 1
+        last_row_idx = torch.tensor([n], dtype=torch.long, device=device)
+        last_col_idx = torch.tensor([n - 1], dtype=torch.long, device=device)
+        last_values = torch.tensor([1.0], dtype=dtype, device=device)
+
+        # Combine all parts
+        row_indices = torch.cat([first_row_idx, middle_row_indices, last_row_idx])
+        col_indices = torch.cat([first_col_idx, middle_col_indices, last_col_idx])
+        values = torch.cat([first_values, middle_values, last_values])
+
+    indices = torch.vstack([row_indices, col_indices])
+
+    output = torch.sparse_coo_tensor(
+        indices, values, (n + 1, n), dtype=dtype, device=device
+    ).coalesce()
+
+    if sparse_type == "csr":
+        return output.to_sparse_csr()
+    else:
+        return output
+
+
 def get_diag(A):
     """
     Extract the diagonal of a PyTorch sparse matrix.

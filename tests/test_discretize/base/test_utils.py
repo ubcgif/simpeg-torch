@@ -7,6 +7,7 @@ from simpegtorch.discretize.utils import (
     sub2ind,
     speye,
     av,
+    av_extrap,
     ddx,
     ndgrid,
     mkvc,
@@ -510,6 +511,21 @@ def test_av():
             [0.5, 0.5, 0, 0],
             [0, 0.5, 0.5, 0],
             [0, 0, 0.5, 0.5],
+        ]
+    )
+    assert torch.allclose(av_mat_dense, expected_av), "av matrix values are incorrect"
+
+
+def test_av_extrap():
+    av_mat = av_extrap(3)
+    assert av_mat.shape == (4, 3), "av matrix shape is incorrect"
+    av_mat_dense = av_mat.to_dense()
+    expected_av = torch.tensor(
+        [
+            [1, 0, 0],
+            [0.5, 0.5, 0.0],
+            [0, 0.5, 0.5],
+            [0, 0, 1],
         ]
     )
     assert torch.allclose(av_mat_dense, expected_av), "av matrix values are incorrect"
