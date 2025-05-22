@@ -40,7 +40,7 @@ def mkvc(x, n_dims=1, dtype=torch.float64, device=None):
     return x
 
 
-def sdiag(v, dtype=torch.float64, device=None):
+def sdiag(v, dtype=torch.float64, device=None, sparse_type="coo"):
     """
     Generate a sparse diagonal matrix from a vector using PyTorch.
 
@@ -53,10 +53,13 @@ def sdiag(v, dtype=torch.float64, device=None):
     device : torch.device, optional
         Device to store the tensor on.
 
+    sparse_type : {'csr', 'coo'}, optional
+        The format of the sparse tensor. Default is 'coo'.
+
     Returns
     -------
     torch.sparse.Tensor
-        A (n, n) sparse diagonal tensor.
+        A (n, n) sparse CSR diagonal tensor.
     """
     if isinstance(v, Zero):
         return Zero()
@@ -68,9 +71,15 @@ def sdiag(v, dtype=torch.float64, device=None):
     indices = torch.arange(n, device=v.device).repeat(2, 1)
     values = v
 
-    return torch.sparse_coo_tensor(
+    tensor = torch.sparse_coo_tensor(
         indices, values, (n, n), dtype=v.dtype, device=v.device
     ).coalesce()
+
+    if sparse_type == "csr":
+        return tensor.to_sparse_csr()
+
+    else:
+        return tensor
 
 
 def speye(n, dtype=torch.float64, device=None):
@@ -94,7 +103,7 @@ def speye(n, dtype=torch.float64, device=None):
     return sdiag(torch.ones(n, dtype=dtype, device=device), dtype=dtype, device=device)
 
 
-def kron(A, B):
+def kron(A, B, sparse_type="coo"):
     """
 
     Method to compute the Kronecker product of torch sparse matrices
@@ -104,7 +113,7 @@ def kron(A, B):
     ----------
     A : sparse matrix of the product
     B : sparse matrix of the product
-    format : tensor.sparse_coo_tensor
+    sparse_type : {'coo', 'csr'}, optional
 
     Returns
     -------
@@ -112,12 +121,19 @@ def kron(A, B):
 
     """
 
-    # check if A and B are coalesced
-    if not A.is_coalesced():
+    # # check if A and B are coalesced
+    if A.is_sparse & (not A.is_coalesced()):
         A = A.coalesce()
 
-    if not B.is_coalesced():
+    if B.is_sparse & (not B.is_coalesced()):
         B = B.coalesce()
+
+    # convert to COO format if CSR
+    # TODO: natively implement Kron in CSR format
+    if A.is_sparse_csr:
+        A = A.to_sparse_coo()
+    if B.is_sparse_csr:
+        B = B.to_sparse_coo()
 
     # calculate the output dimensions
     output_shape = (A.shape[0] * B.shape[0], A.shape[1] * B.shape[1])
@@ -144,9 +160,156 @@ def kron(A, B):
     data = data.reshape(-1)
 
     # return output_shape
-    return torch.sparse_coo_tensor(
+    output = torch.sparse_coo_tensor(
         torch.vstack([row, col]), data, output_shape
     ).coalesce()
+
+    if sparse_type == "csr":
+        return output.to_sparse_csr()
+    else:
+        return output
+
+
+def kron3(A, B, C, sparse_type="coo"):
+    """
+    Compute the Kronecker product of three sparse matrices.
+
+    Parameters
+    ----------
+    A : torch.sparse.Tensor
+        First sparse matrix.
+    B : torch.sparse.Tensor
+        Second sparse matrix.
+    C : torch.sparse.Tensor
+        Third sparse matrix.
+
+    Returns
+    -------
+    torch.sparse.Tensor
+        The Kronecker product of A, B, and C.
+    """
+    return kron(kron(A, B), C, sparse_type=sparse_type)
+
+
+def ddx(n, dtype=torch.float64, device=None, sparse_type="coo"):
+    r"""Create 1D difference (derivative) operator from nodes to centers.
+
+    For n cells, the 1D difference (derivative) operator from nodes to
+    centers is sparse, has shape (n, n+1) and takes the form:
+
+    .. math::
+        \begin{bmatrix}
+        -1 & 1 & & & \\
+        & -1 & 1 & & \\
+        & & \ddots & \ddots & \\
+        & & & -1 & 1
+        \end{bmatrix}
+
+    Parameters
+    ----------
+    n : int
+        Number of cells (output rows).
+    dtype : torch.dtype, optional
+        Data type of the tensor.
+    device : torch.device, optional
+        Device to store the tensor on.
+    sparse_type : {'coo', 'csr'}, optional
+        Output sparse format.
+    Returns
+    -------
+    torch.sparse.Tensor
+        1D sparse difference operator of shape (n, n+1).
+    """
+    # Create row indices: each row i has two entries
+    row_indices = torch.arange(n, dtype=torch.long, device=device).repeat(2)
+
+    # Create column indices: for row i, columns are i and i+1
+    col_indices = torch.cat(
+        [
+            torch.arange(
+                n, dtype=torch.long, device=device
+            ),  # columns 0, 1, 2, ..., n-1
+            torch.arange(
+                1, n + 1, dtype=torch.long, device=device
+            ),  # columns 1, 2, 3, ..., n
+        ]
+    )
+
+    # Create values: -1 for first column, +1 for second column
+    values = torch.cat(
+        [
+            -torch.ones(n, dtype=dtype, device=device),  # -1 values
+            torch.ones(n, dtype=dtype, device=device),  # +1 values
+        ]
+    )
+
+    indices = torch.vstack([row_indices, col_indices])
+
+    output = torch.sparse_coo_tensor(
+        indices, values, (n, n + 1), dtype=dtype, device=device
+    ).coalesce()
+
+    if sparse_type == "csr":
+        return output.to_sparse_csr()
+    else:
+        return output
+
+
+def av(n, dtype=torch.float64, device=None, sparse_type="coo"):
+    r"""Create 1D averaging operator from nodes to cell-centers.
+    For n cells, the 1D averaging operator from nodes to cell-centers is sparse,
+    has shape (n, n+1) and takes the form:
+    .. math::
+        \begin{bmatrix}
+        0.5 & 0.5 & & & \\
+        & 0.5 & 0.5 & & \\
+        & & \ddots & \ddots & \\
+        & & & 0.5 & 0.5
+        \end{bmatrix}
+
+    Parameters
+    ----------
+    n : int
+        Number of cells (output rows).
+    dtype : torch.dtype, optional
+        Data type of the tensor.
+    device : torch.device, optional
+        Device to store the tensor on.
+    sparse_type : {'coo', 'csr'}, optional
+        Output sparse format.
+    Returns
+    -------
+    torch.sparse.Tensor
+        1D sparse averaging operator of shape (n, n+1).
+    """
+    # Create row indices: each row i has two entries
+    row_indices = torch.arange(n, dtype=torch.long, device=device).repeat(2)
+
+    # Create column indices: for row i, columns are i and i+1
+    col_indices = torch.cat(
+        [
+            torch.arange(
+                n, dtype=torch.long, device=device
+            ),  # columns 0, 1, 2, ..., n-1
+            torch.arange(
+                1, n + 1, dtype=torch.long, device=device
+            ),  # columns 1, 2, 3, ..., n
+        ]
+    )
+
+    # Create values: 0.5 for both columns
+    values = 0.5 * torch.ones(2 * n, dtype=dtype, device=device)
+
+    indices = torch.vstack([row_indices, col_indices])
+
+    output = torch.sparse_coo_tensor(
+        indices, values, (n, n + 1), dtype=dtype, device=device
+    ).coalesce()
+
+    if sparse_type == "csr":
+        return output.to_sparse_csr()
+    else:
+        return output
 
 
 def get_diag(A):
@@ -630,8 +793,14 @@ class Identity:
 
         sign = 1 if self._positive else -1
 
-        if tensor.is_sparse:
-            return tensor + sign * sdiag(torch.ones(tensor.shape[0]))
+        if tensor.is_sparse_csr:
+            ## workaround as sparse CSR tensors do not have addition implemented on CPU
+            return tensor.to_sparse() + sign * sdiag(
+                torch.ones(tensor.shape[0]), sparse_type="coo"
+            )
+
+        elif tensor.is_sparse:
+            return tensor + sign * sdiag(torch.ones(tensor.shape[0]), sparse_type="coo")
 
         else:  # dense tensor
             return tensor + sign if op == "add" else tensor - sign
@@ -823,7 +992,9 @@ def inverse_property_tensor(
     return T
 
 
-def make_property_tensor(mesh, tensor, dtype=torch.float64, device=None):
+def make_property_tensor(
+    mesh, tensor, dtype=torch.float64, device=None, sparse_type="coo"
+):
     """Construct the physical property tensor."""
     n_cells = mesh.n_cells
     dim = mesh.dim
@@ -867,4 +1038,7 @@ def make_property_tensor(mesh, tensor, dtype=torch.float64, device=None):
     else:
         raise Exception("Unexpected shape of tensor")
 
-    return Sigma
+    if sparse_type == "csr":
+        return Sigma.to_sparse_csr()
+    else:
+        return Sigma

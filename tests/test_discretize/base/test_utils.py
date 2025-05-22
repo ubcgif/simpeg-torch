@@ -6,6 +6,8 @@ from simpegtorch.discretize.utils import (
     sdiag,
     sub2ind,
     speye,
+    av,
+    ddx,
     ndgrid,
     mkvc,
     kron,
@@ -241,7 +243,7 @@ def test_mat_one():
     S = sdiag(torch.tensor([2, 3]))
 
     def check(exp, ans):
-        assert torch.all(exp.to_dense() == torch.tensor(ans))
+        assert torch.all(exp.to_dense() == torch.tensor(ans)), f"{exp} != {ans}"
 
     check(S * o, [[2, 0], [0, 3]])
     check(o * S, [[2, 0], [0, 3]])
@@ -478,3 +480,36 @@ def test_kron():
     assert torch.allclose(
         result_dense, expected_dense
     ), "Kronecker product values incorrect"
+
+
+def test_ddx():
+    ddx_mat = ddx(3)
+    assert ddx_mat.shape == (3, 4), "ddx matrix shape is incorrect"
+    ddx_mat_dense = ddx_mat.to_dense()
+
+    expected_ddx = torch.tensor(
+        [
+            [-1, 1, 0, 0],
+            [0, -1, 1, 0],
+            [0, 0, -1, 1],
+        ],
+        dtype=torch.float64,
+    )
+
+    assert torch.allclose(
+        ddx_mat_dense, expected_ddx
+    ), "ddx matrix values are incorrect"
+
+
+def test_av():
+    av_mat = av(3)
+    assert av_mat.shape == (3, 4), "av matrix shape is incorrect"
+    av_mat_dense = av_mat.to_dense()
+    expected_av = torch.tensor(
+        [
+            [0.5, 0.5, 0, 0],
+            [0, 0.5, 0.5, 0],
+            [0, 0, 0.5, 0.5],
+        ]
+    )
+    assert torch.allclose(av_mat_dense, expected_av), "av matrix values are incorrect"

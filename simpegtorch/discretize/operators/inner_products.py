@@ -2,6 +2,7 @@ from discretize.base import BaseMesh
 from discretize.utils import (
     # sub2ind,
     sdiag,
+    # kron,
     inverse_property_tensor,
     TensorType,
     make_property_tensor,
