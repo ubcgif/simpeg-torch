@@ -17,6 +17,25 @@ class BaseMesh:
     that should be supported on all discretize meshes.
     """
 
+    _aliases = {
+        "nC": "n_cells",
+        "nN": "n_nodes",
+        "nE": "n_edges",
+        "nF": "n_faces",
+        "serialize": "to_dict",
+        "gridCC": "cell_centers",
+        "gridN": "nodes",
+        "aveF2CC": "average_face_to_cell",
+        "aveF2CCV": "average_face_to_cell_vector",
+        "aveCC2F": "average_cell_to_face",
+        "aveCCV2F": "average_cell_vector_to_face",
+        "aveE2CC": "average_edge_to_cell",
+        "aveE2CCV": "average_edge_to_cell_vector",
+        "aveN2CC": "average_node_to_cell",
+        "aveN2E": "average_node_to_edge",
+        "aveN2F": "average_node_to_face",
+    }
+
     def to_dict(self):
         """Represent the mesh's attributes as a dictionary.
 

@@ -5,17 +5,18 @@ import pytest
 from simpegtorch.discretize.utils import (
     sdiag,
     sub2ind,
+    speye,
     ndgrid,
     mkvc,
     is_scalar,
-    # inverse_2x2_block_diagonal,
-    # inverse_3x3_block_diagonal,
-    # inverse_property_tensor,
-    # make_property_tensor,
+    inverse_2x2_block_diagonal,
+    inverse_3x3_block_diagonal,
+    inverse_property_tensor,
+    make_property_tensor,
     # index_cube,
     ind2sub,
     as_array_n_by_dim,
-    # TensorType,
+    TensorType,
     Zero,
     Identity,
     # extract_core_mesh,
@@ -25,6 +26,11 @@ from simpegtorch.discretize.utils import (
     # unpack_widths,
     # cross2d,
 )
+
+import simpegtorch.discretize as discretize
+
+torch.set_default_dtype(torch.float64)
+
 
 TOL = 1e-8
 
@@ -282,3 +288,128 @@ def test_both():
     assert o * z == 0
     assert o * z + o == 1
     assert o - z == 1
+
+
+def test_invXXXBlockDiagonal():
+    torch.manual_seed(78352)
+    a = [torch.rand((5, 1)) for i in range(4)]
+
+    B = inverse_2x2_block_diagonal(*a)
+
+    A = torch.vstack(
+        (
+            torch.hstack((sdiag(a[0]), sdiag(a[1]))),
+            torch.hstack((sdiag(a[2]), sdiag(a[3]))),
+        )
+    )
+
+    Z2 = B @ A - speye(10)
+    assert torch.norm(Z2.to_dense().flatten(), 2) < TOL
+
+    a = [torch.rand((5, 1)) for i in range(9)]
+    B = inverse_3x3_block_diagonal(*a)
+
+    A = torch.vstack(
+        (
+            torch.hstack((sdiag(a[0]), sdiag(a[1]), sdiag(a[2]))),
+            torch.hstack((sdiag(a[3]), sdiag(a[4]), sdiag(a[5]))),
+            torch.hstack((sdiag(a[6]), sdiag(a[7]), sdiag(a[8]))),
+        )
+    )
+
+    Z3 = B @ A - speye(15)
+
+    assert torch.norm(Z3.to_dense().flatten(), 2) < TOL
+
+
+def test_TensorType2D():
+    torch.manual_seed(8564)
+    M = discretize.TensorMesh([6, 6])
+    a1 = torch.rand(M.n_cells)
+    a2 = torch.rand(M.n_cells)
+    a3 = torch.rand(M.n_cells)
+    prop1 = a1
+    prop2 = torch.stack([a1, a2], dim=0).T
+    prop3 = torch.stack([a1, a2, a3], dim=0).T
+
+    for ii, prop in enumerate([4, prop1, prop2, prop3]):
+        assert TensorType(M, prop) == ii
+
+    with pytest.raises(Exception) as _:
+        TensorType(M, np.c_[a1, a2, a3, a3])
+    assert TensorType(M, None) == -1
+
+
+def test_TensorType3D():
+    torch.manual_seed(78352)
+    M = discretize.TensorMesh([6, 6, 7])
+    # Generate random tensors
+    a1 = torch.rand(M.n_cells)
+    a2 = torch.rand(M.n_cells)
+    a3 = torch.rand(M.n_cells)
+    a4 = torch.rand(M.n_cells)
+    a5 = torch.rand(M.n_cells)
+    a6 = torch.rand(M.n_cells)
+    prop1 = a1
+
+    # Stack along a new dimension and transpose
+    prop2 = torch.stack([a1, a2, a3], dim=0).T
+    prop3 = torch.stack([a1, a2, a3, a4, a5, a6], dim=0).T
+
+    for ii, prop in enumerate([4, prop1, prop2, prop3]):
+        assert TensorType(M, prop) == ii
+
+    with pytest.raises(Exception) as _:
+        TensorType(M, torch.stack([a1, a2, a3, a3], dim=0).T)
+
+    assert TensorType(M, None) == -1
+
+
+def test_inverse_property_tensor3D():
+    # Use torch's random generator
+    torch.manual_seed(78352)
+
+    M = discretize.TensorMesh([6, 6, 6])
+
+    # Generate random tensors
+    a1 = torch.rand(M.n_cells)
+    a2 = torch.rand(M.n_cells)
+    a3 = torch.rand(M.n_cells)
+    a4 = torch.rand(M.n_cells)
+    a5 = torch.rand(M.n_cells)
+    a6 = torch.rand(M.n_cells)
+
+    prop1 = a1
+
+    # Stack along a new dimension and transpose
+    prop2 = torch.stack([a1, a2, a3], dim=0).T
+    prop3 = torch.stack([a1, a2, a3, a4, a5, a6], dim=0).T
+
+    for prop in [4, prop1, prop2, prop3]:
+        b = inverse_property_tensor(M, prop)
+        A = make_property_tensor(M, prop)
+        B1 = make_property_tensor(M, b)
+        B2 = inverse_property_tensor(M, prop, return_matrix=True)
+
+        # Create identity tensor
+        identity = speye(M.n_cells * 3)
+
+        # Matrix multiplication and norm calculation
+        Z = B1 @ A - identity
+
+        # If Z is a sparse tensor, convert to dense for norm calculation
+        if hasattr(Z, "to_dense"):
+            Z_dense = Z.to_dense()
+        else:
+            Z_dense = Z
+
+        assert torch.norm(Z_dense.flatten(), 2) < TOL
+
+        Z = B2 @ A - identity
+
+        if hasattr(Z, "to_dense"):
+            Z_dense = Z.to_dense()
+        else:
+            Z_dense = Z
+
+        assert torch.norm(Z_dense.flatten(), 2) < TOL

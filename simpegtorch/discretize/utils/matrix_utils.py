@@ -1,4 +1,5 @@
 import torch
+from simpegtorch.discretize.utils.code_utils import is_scalar
 
 
 def mkvc(x, n_dims=1, dtype=torch.float64, device=None):
@@ -70,6 +71,27 @@ def sdiag(v, dtype=torch.float64, device=None):
     return torch.sparse_coo_tensor(
         indices, values, (n, n), dtype=v.dtype, device=v.device
     )
+
+
+def speye(n, dtype=torch.float64, device=None):
+    """
+    Generate a sparse identity matrix using PyTorch.
+
+    Parameters
+    ----------
+    n : int
+        Size of the identity matrix.
+    dtype : torch.dtype, optional
+        Data type of the tensor.
+    device : torch.device, optional
+        Device to store the tensor on.
+
+    Returns
+    -------
+    torch.sparse.Tensor
+        A (n, n) sparse identity tensor.
+    """
+    return sdiag(torch.ones(n, dtype=dtype, device=device), dtype=dtype, device=device)
 
 
 def get_diag(A):
@@ -569,3 +591,260 @@ class _inftup(tuple):
 
     def __repr__(self):
         return f"({self._val}, {self._val}, ...)"
+
+
+class TensorType:
+    r"""Class for determining property tensor type."""
+
+    def __init__(self, mesh, tensor):
+        if tensor is None:  # default is ones
+            self._tt = -1
+            self._tts = "none"
+
+        elif is_scalar(tensor):
+            self._tt = 0
+            self._tts = "scalar"
+
+        elif isinstance(tensor, torch.Tensor) and tensor.numel() == mesh.n_cells:
+            self._tt = 1
+            self._tts = "isotropic"
+
+        elif isinstance(tensor, torch.Tensor) and (
+            (mesh.dim == 2 and tensor.numel() == mesh.n_cells * 2)
+            or (mesh.dim == 3 and tensor.numel() == mesh.n_cells * 3)
+        ):
+            self._tt = 2
+            self._tts = "anisotropic"
+
+        elif isinstance(tensor, torch.Tensor) and (
+            (mesh.dim == 2 and tensor.numel() == mesh.n_cells * 3)
+            or (mesh.dim == 3 and tensor.numel() == mesh.n_cells * 6)
+        ):
+            self._tt = 3
+            self._tts = "tensor"
+
+        else:
+            raise Exception(f"Unexpected shape of tensor: {tensor.shape}")
+
+    def __str__(self):
+        return f"TensorType[{self._tt:d}]: {self._tts!s}"
+
+    def __eq__(self, v):
+        return self._tt == v
+
+    def __le__(self, v):
+        return self._tt <= v
+
+    def __ge__(self, v):
+        return self._tt >= v
+
+    def __lt__(self, v):
+        return self._tt < v
+
+    def __gt__(self, v):
+        return self._tt > v
+
+
+def inverse_2x2_block_diagonal(a11, a12, a21, a22, return_matrix=True):
+    # Vectorized determinant and inverse formula for 2x2 matrices
+    a11 = mkvc(a11)
+    a12 = mkvc(a12)
+    a21 = mkvc(a21)
+    a22 = mkvc(a22)
+
+    det = a11 * a22 - a12 * a21
+    inv_det = 1.0 / det
+
+    b11 = a22 * inv_det
+    b22 = a11 * inv_det
+    b12 = -a12 * inv_det
+    b21 = -a21 * inv_det
+
+    if return_matrix:
+        return torch.vstack(
+            (
+                torch.hstack((sdiag(b11), sdiag(b12))),
+                torch.hstack((sdiag(b21), sdiag(b22))),
+            )
+        )
+
+    return b11, b12, b21, b22
+
+
+def inverse_3x3_block_diagonal(
+    a11, a12, a13, a21, a22, a23, a31, a32, a33, return_matrix=True
+):
+    # Construct batched 3x3 matrices: shape (n, 3, 3)
+    a11 = mkvc(a11)
+    a12 = mkvc(a12)
+    a13 = mkvc(a13)
+    a21 = mkvc(a21)
+    a22 = mkvc(a22)
+    a23 = mkvc(a23)
+    a31 = mkvc(a31)
+    a32 = mkvc(a32)
+    a33 = mkvc(a33)
+
+    A = torch.stack(
+        [
+            torch.stack([a11, a12, a13], dim=-1),
+            torch.stack([a21, a22, a23], dim=-1),
+            torch.stack([a31, a32, a33], dim=-1),
+        ],
+        dim=-2,
+    )  # shape: (n, 3, 3)
+
+    A_inv = torch.linalg.inv(A)
+
+    b11 = A_inv[:, 0, 0]
+    b12 = A_inv[:, 0, 1]
+    b13 = A_inv[:, 0, 2]
+    b21 = A_inv[:, 1, 0]
+    b22 = A_inv[:, 1, 1]
+    b23 = A_inv[:, 1, 2]
+    b31 = A_inv[:, 2, 0]
+    b32 = A_inv[:, 2, 1]
+    b33 = A_inv[:, 2, 2]
+
+    if return_matrix:
+        return torch.vstack(
+            (
+                torch.hstack((sdiag(b11), sdiag(b12), sdiag(b13))),
+                torch.hstack((sdiag(b21), sdiag(b22), sdiag(b23))),
+                torch.hstack((sdiag(b31), sdiag(b32), sdiag(b33))),
+            )
+        )
+
+    # Return components in the same flattened structure
+    return tuple(A_inv[:, i, j] for i in range(3) for j in range(3))
+
+
+def inverse_property_tensor(mesh, tensor, return_matrix=False, dtype=None, device=None):
+    """Construct the inverse of the physical property tensor."""
+    propType = TensorType(mesh, tensor)
+    if is_scalar(tensor):
+        T = torch.tensor(1.0 / tensor)
+    elif propType < 3:
+        T = 1.0 / mkvc(tensor)
+    elif mesh.dim == 2 and tensor.numel() == mesh.n_cells * 3:
+        tensor = tensor.view(mesh.n_cells, 3)
+        B = inverse_2x2_block_diagonal(
+            tensor[:, 0], tensor[:, 2], tensor[:, 2], tensor[:, 1], return_matrix=False
+        )
+        b11, b12, b21, b22 = B
+        T = torch.cat([b11, b22, b12])
+    elif mesh.dim == 3 and tensor.numel() == mesh.n_cells * 6:
+        tensor = tensor.view(mesh.n_cells, 6)
+        B = inverse_3x3_block_diagonal(
+            tensor[:, 0],
+            tensor[:, 3],
+            tensor[:, 5],
+            tensor[:, 3],
+            tensor[:, 1],
+            tensor[:, 4],
+            tensor[:, 3],
+            tensor[:, 4],
+            tensor[:, 2],
+            return_matrix=False,
+        )
+        b11, b12, b13, b21, b22, b23, b31, b32, b33 = B
+        T = torch.cat([b11, b22, b33, b12, b13, b23], dim=0)
+    else:
+        raise Exception("Unexpected shape of tensor")
+
+    if return_matrix:
+        return make_property_tensor(mesh, T, dtype, device)
+
+    return T
+
+
+def make_property_tensor(mesh, tensor, dtype=None, device=None):
+    """Construct the physical property tensor."""
+    n_cells = mesh.n_cells
+    dim = mesh.dim
+    device = mesh.device if device is None else device
+    dtype = mesh.dtype if dtype is None else dtype
+
+    if tensor is None:
+        tensor = torch.ones(n_cells, device=device, dtype=dtype)
+    elif is_scalar(tensor):
+        tensor = tensor * torch.ones(n_cells, device=device, dtype=dtype)
+    else:
+        tensor = torch.as_tensor(tensor, device=device, dtype=dtype)
+
+    row_idx = []
+    col_idx = []
+    values = []
+
+    if tensor.ndim == 1:
+        # Isotropic
+        for i in range(dim):
+            base = i * n_cells
+            row_idx.append(torch.arange(n_cells, device=device) + base)
+            col_idx.append(torch.arange(n_cells, device=device) + base)
+            values.append(tensor)
+    elif tensor.ndim == 2 and tensor.shape[1] == dim:
+        # Diagonal anisotropic
+        for i in range(dim):
+            base = i * n_cells
+            row_idx.append(torch.arange(n_cells, device=device) + base)
+            col_idx.append(torch.arange(n_cells, device=device) + base)
+            values.append(tensor[:, i])
+    elif dim == 2 and tensor.numel() == n_cells * 3:
+        # Full anisotropic 2D: [xx, yy, xy]
+        tensor = tensor.reshape(n_cells, 3)
+        idx = torch.arange(n_cells, device=device)
+
+        # Sigma_xx
+        row_idx.append(idx)
+        col_idx.append(idx)
+        values.append(tensor[:, 0])
+
+        # Sigma_yy
+        row_idx.append(idx + n_cells)
+        col_idx.append(idx + n_cells)
+        values.append(tensor[:, 1])
+
+        # Sigma_xy (off-diagonal, symmetric)
+        row_idx.append(idx)
+        col_idx.append(idx + n_cells)
+        values.append(tensor[:, 2])
+
+        row_idx.append(idx + n_cells)
+        col_idx.append(idx)
+        values.append(tensor[:, 2])
+    elif dim == 3 and tensor.numel() == n_cells * 6:
+        # Full anisotropic 3D: [xx, yy, zz, xy, xz, yz]
+        tensor = tensor.reshape(n_cells, 6)
+        idx = torch.arange(n_cells, device=device)
+
+        offset = [0, n_cells, 2 * n_cells]
+
+        # Diagonal entries
+        row_idx += [idx + o for o in offset]
+        col_idx += [idx + o for o in offset]
+        values += [tensor[:, i] for i in range(3)]
+
+        # Off-diagonals
+        irow, icol, v = zip(
+            (idx, idx + n_cells, tensor[:, 3]),  # xy
+            (idx, idx + 2 * n_cells, tensor[:, 4]),  # xz
+            (idx + n_cells, idx + 2 * n_cells, tensor[:, 5]),  # yz
+        )
+        for r, c, val in zip(irow, icol, v):
+            row_idx += [r, c]
+            col_idx += [c, r]
+            values += [val, val]
+    else:
+        raise ValueError(f"Unexpected tensor shape for dim={dim}: {tensor.shape}")
+
+    # Stack and build sparse tensor
+    row_idx = torch.cat(row_idx)
+    col_idx = torch.cat(col_idx)
+    values = torch.cat(values)
+
+    indices = torch.stack([row_idx, col_idx], dim=0)
+    size = (dim * n_cells, dim * n_cells)
+
+    Sigma = torch.sparse_coo_tensor(indices, values, size, dtype=dtype, device=device)
+    return Sigma.coalesce()
