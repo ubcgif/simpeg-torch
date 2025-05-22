@@ -8,6 +8,8 @@ from simpegtorch.discretize.utils import (
     speye,
     ndgrid,
     mkvc,
+    kron,
+    reshape_fortran,
     is_scalar,
     inverse_2x2_block_diagonal,
     inverse_3x3_block_diagonal,
@@ -385,7 +387,7 @@ def test_inverse_property_tensor3D():
     prop2 = torch.stack([a1, a2, a3], dim=0).T
     prop3 = torch.stack([a1, a2, a3, a4, a5, a6], dim=0).T
 
-    for prop in [4, prop1, prop2, prop3]:
+    for i, prop in enumerate([4, prop1, prop2, prop3]):
         b = inverse_property_tensor(M, prop)
         A = make_property_tensor(M, prop)
         B1 = make_property_tensor(M, b)
@@ -403,7 +405,9 @@ def test_inverse_property_tensor3D():
         else:
             Z_dense = Z
 
-        assert torch.norm(Z_dense.flatten(), 2) < TOL
+        assert (
+            torch.norm(Z_dense.flatten(), 2) < TOL
+        ), f"Norm of Z is not close to zero on iter: {i}"
 
         Z = B2 @ A - identity
 
@@ -413,3 +417,64 @@ def test_inverse_property_tensor3D():
             Z_dense = Z
 
         assert torch.norm(Z_dense.flatten(), 2) < TOL
+
+
+def test_reshape_fortran():
+    """Test the reshape_fortran function using NumPy's Fortran order as reference."""
+    torch.manual_seed(8564)
+
+    # Test 1: Basic 2D to 1D reshape
+    x_np = np.arange(12).reshape(3, 4)
+    x_torch = torch.from_numpy(x_np.copy())
+
+    reshaped_torch = reshape_fortran(x_torch, (12,))
+    expected_np = x_np.reshape(12, order="F")
+    expected_torch = torch.from_numpy(expected_np)
+
+    assert torch.equal(
+        reshaped_torch, expected_torch
+    ), "2D to 1D reshape failed against NumPy reference"
+
+    # Test 2: 1D to 2D reshape
+    x_np = np.arange(12)
+    x_torch = torch.from_numpy(x_np.copy())
+
+    reshaped_torch = reshape_fortran(x_torch, (3, 4))
+    expected_np = x_np.reshape(3, 4, order="F")
+    expected_torch = torch.from_numpy(expected_np)
+
+    assert torch.equal(
+        reshaped_torch, expected_torch
+    ), "1D to 2D reshape failed against NumPy reference"
+
+    # Test 3: 2D to 2D reshape (different dimensions)
+    x_np = np.arange(12).reshape(2, 6)
+    x_torch = torch.from_numpy(x_np.copy())
+
+    reshaped_torch = reshape_fortran(x_torch, (4, 3))
+    expected_np = x_np.reshape(4, 3, order="F")
+    expected_torch = torch.from_numpy(expected_np)
+
+
+def test_kron():
+    """Test the kron function for Kronecker product of sparse matrices."""
+    torch.manual_seed(8564)
+
+    A_indices = torch.tensor([[0, 1], [0, 1]])
+    A_values = torch.rand(2)
+    A = torch.sparse_coo_tensor(A_indices, A_values, (2, 2))
+
+    B_indices = torch.tensor([[0, 1], [0, 1]])
+    B_values = torch.rand(2)
+    B = torch.sparse_coo_tensor(B_indices, B_values, (2, 2))
+
+    result = kron(A, B)
+    assert result.shape == (4, 4), "Kronecker product dimensions incorrect"
+
+    result_dense = result.to_dense()
+    A_dense = A.to_dense()
+    B_dense = B.to_dense()
+    expected_dense = torch.kron(A_dense, B_dense)
+    assert torch.allclose(
+        result_dense, expected_dense
+    ), "Kronecker product values incorrect"

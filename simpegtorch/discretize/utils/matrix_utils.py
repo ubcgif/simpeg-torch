@@ -70,7 +70,7 @@ def sdiag(v, dtype=torch.float64, device=None):
 
     return torch.sparse_coo_tensor(
         indices, values, (n, n), dtype=v.dtype, device=v.device
-    )
+    ).coalesce()
 
 
 def speye(n, dtype=torch.float64, device=None):
@@ -92,6 +92,61 @@ def speye(n, dtype=torch.float64, device=None):
         A (n, n) sparse identity tensor.
     """
     return sdiag(torch.ones(n, dtype=dtype, device=device), dtype=dtype, device=device)
+
+
+def kron(A, B):
+    """
+
+    Method to compute the Kronecker product of torch sparse matrices
+    Based on scipy's sparse Kronecker product
+
+    Parameters
+    ----------
+    A : sparse matrix of the product
+    B : sparse matrix of the product
+    format : tensor.sparse_coo_tensor
+
+    Returns
+    -------
+    kronecker product in a tensor sparse coo matrix format
+
+    """
+
+    # check if A and B are coalesced
+    if not A.is_coalesced():
+        A = A.coalesce()
+
+    if not B.is_coalesced():
+        B = B.coalesce()
+
+    # calculate the output dimensions
+    output_shape = (A.shape[0] * B.shape[0], A.shape[1] * B.shape[1])
+
+    # determine row and columns and extract the data from sparse matrix A
+    row = A.indices()[0, :].repeat_interleave(B.values().shape[0])
+    col = A.indices()[1, :].repeat_interleave(B.values().shape[0])
+    data = A.values().repeat_interleave(B.values().shape[0])
+
+    # take into account sparse matrix B
+    row *= B.shape[0]
+    col *= B.shape[1]
+
+    # increment block indices
+    row, col = row.reshape(-1, B.values().shape[0]), col.reshape(
+        -1, B.values().shape[0]
+    )
+    row += B.indices()[0, :]
+    col += B.indices()[1, :]
+    row, col = row.reshape(-1), col.reshape(-1)
+
+    # compute block entries
+    data = data.reshape(-1, B.values().shape[0]) * B.values()
+    data = data.reshape(-1)
+
+    # return output_shape
+    return torch.sparse_coo_tensor(
+        torch.vstack([row, col]), data, output_shape
+    ).coalesce()
 
 
 def get_diag(A):
@@ -267,6 +322,13 @@ def sub2ind(shape, subs):
         strides[i] = strides[i - 1] * shape[i - 1]
 
     return (subs * strides).sum(dim=1)
+
+
+def reshape_fortran(x, shape):
+    """Reshape a tensor to a specified shape using Fortran order. Needed as PyTorch does not support this natively."""
+    if len(x.shape) > 0:
+        x = x.permute(*reversed(range(len(x.shape))))
+    return x.reshape(*reversed(shape)).permute(*reversed(range(len(shape))))
 
 
 def ind2sub(shape, inds, dtype=torch.int64, device=None):
@@ -716,34 +778,37 @@ def inverse_3x3_block_diagonal(
         )
 
     # Return components in the same flattened structure
-    return tuple(A_inv[:, i, j] for i in range(3) for j in range(3))
+    return b11, b12, b13, b21, b22, b23, b31, b32, b33
 
 
-def inverse_property_tensor(mesh, tensor, return_matrix=False, dtype=None, device=None):
+def inverse_property_tensor(
+    mesh, tensor, return_matrix=False, dtype=torch.float64, device=None
+):
     """Construct the inverse of the physical property tensor."""
     propType = TensorType(mesh, tensor)
+
     if is_scalar(tensor):
         T = torch.tensor(1.0 / tensor)
     elif propType < 3:
         T = 1.0 / mkvc(tensor)
     elif mesh.dim == 2 and tensor.numel() == mesh.n_cells * 3:
-        tensor = tensor.view(mesh.n_cells, 3)
+        tensor = reshape_fortran(tensor, (mesh.n_cells, 3))
         B = inverse_2x2_block_diagonal(
             tensor[:, 0], tensor[:, 2], tensor[:, 2], tensor[:, 1], return_matrix=False
         )
         b11, b12, b21, b22 = B
-        T = torch.cat([b11, b22, b12])
+        T = torch.cat([b11, b22, b12], dim=0)
     elif mesh.dim == 3 and tensor.numel() == mesh.n_cells * 6:
-        tensor = tensor.view(mesh.n_cells, 6)
+        tensor = reshape_fortran(tensor, (mesh.n_cells, 6))
         B = inverse_3x3_block_diagonal(
             tensor[:, 0],
             tensor[:, 3],
-            tensor[:, 5],
+            tensor[:, 4],
             tensor[:, 3],
             tensor[:, 1],
+            tensor[:, 5],
             tensor[:, 4],
-            tensor[:, 3],
-            tensor[:, 4],
+            tensor[:, 5],
             tensor[:, 2],
             return_matrix=False,
         )
@@ -758,7 +823,7 @@ def inverse_property_tensor(mesh, tensor, return_matrix=False, dtype=None, devic
     return T
 
 
-def make_property_tensor(mesh, tensor, dtype=None, device=None):
+def make_property_tensor(mesh, tensor, dtype=torch.float64, device=None):
     """Construct the physical property tensor."""
     n_cells = mesh.n_cells
     dim = mesh.dim
@@ -772,79 +837,34 @@ def make_property_tensor(mesh, tensor, dtype=None, device=None):
     else:
         tensor = torch.as_tensor(tensor, device=device, dtype=dtype)
 
-    row_idx = []
-    col_idx = []
-    values = []
+    propType = TensorType(mesh, tensor)
 
-    if tensor.ndim == 1:
-        # Isotropic
-        for i in range(dim):
-            base = i * n_cells
-            row_idx.append(torch.arange(n_cells, device=device) + base)
-            col_idx.append(torch.arange(n_cells, device=device) + base)
-            values.append(tensor)
-    elif tensor.ndim == 2 and tensor.shape[1] == dim:
-        # Diagonal anisotropic
-        for i in range(dim):
-            base = i * n_cells
-            row_idx.append(torch.arange(n_cells, device=device) + base)
-            col_idx.append(torch.arange(n_cells, device=device) + base)
-            values.append(tensor[:, i])
-    elif dim == 2 and tensor.numel() == n_cells * 3:
-        # Full anisotropic 2D: [xx, yy, xy]
-        tensor = tensor.reshape(n_cells, 3)
-        idx = torch.arange(n_cells, device=device)
+    if propType == 1:  # Isotropic
+        Sigma = kron(speye(dim), sdiag(mkvc(tensor)))
 
-        # Sigma_xx
-        row_idx.append(idx)
-        col_idx.append(idx)
-        values.append(tensor[:, 0])
+    elif propType == 2:  # Anisotropic
+        Sigma = sdiag(mkvc(tensor))
 
-        # Sigma_yy
-        row_idx.append(idx + n_cells)
-        col_idx.append(idx + n_cells)
-        values.append(tensor[:, 1])
+    elif dim == 2 and tensor.numel() == n_cells * 3:  # Fully anisotropic, 2D
+        tensor = reshape_fortran(tensor, (n_cells, 3))
+        row1 = torch.hstack((sdiag(tensor[:, 0]), sdiag(tensor[:, 2])))
+        row2 = torch.hstack((sdiag(tensor[:, 2]), sdiag(tensor[:, 1])))
+        Sigma = torch.vstack((row1, row2))
 
-        # Sigma_xy (off-diagonal, symmetric)
-        row_idx.append(idx)
-        col_idx.append(idx + n_cells)
-        values.append(tensor[:, 2])
-
-        row_idx.append(idx + n_cells)
-        col_idx.append(idx)
-        values.append(tensor[:, 2])
-    elif dim == 3 and tensor.numel() == n_cells * 6:
-        # Full anisotropic 3D: [xx, yy, zz, xy, xz, yz]
-        tensor = tensor.reshape(n_cells, 6)
-        idx = torch.arange(n_cells, device=device)
-
-        offset = [0, n_cells, 2 * n_cells]
-
-        # Diagonal entries
-        row_idx += [idx + o for o in offset]
-        col_idx += [idx + o for o in offset]
-        values += [tensor[:, i] for i in range(3)]
-
-        # Off-diagonals
-        irow, icol, v = zip(
-            (idx, idx + n_cells, tensor[:, 3]),  # xy
-            (idx, idx + 2 * n_cells, tensor[:, 4]),  # xz
-            (idx + n_cells, idx + 2 * n_cells, tensor[:, 5]),  # yz
+    elif dim == 3 and tensor.numel() == n_cells * 6:  # Fully anisotropic, 3D
+        tensor = reshape_fortran(tensor, (n_cells, 6))
+        row1 = torch.hstack(
+            (sdiag(tensor[:, 0]), sdiag(tensor[:, 3]), sdiag(tensor[:, 4]))
         )
-        for r, c, val in zip(irow, icol, v):
-            row_idx += [r, c]
-            col_idx += [c, r]
-            values += [val, val]
+        row2 = torch.hstack(
+            (sdiag(tensor[:, 3]), sdiag(tensor[:, 1]), sdiag(tensor[:, 5]))
+        )
+        row3 = torch.hstack(
+            (sdiag(tensor[:, 4]), sdiag(tensor[:, 5]), sdiag(tensor[:, 2]))
+        )
+        Sigma = torch.vstack((row1, row2, row3))
+
     else:
-        raise ValueError(f"Unexpected tensor shape for dim={dim}: {tensor.shape}")
+        raise Exception("Unexpected shape of tensor")
 
-    # Stack and build sparse tensor
-    row_idx = torch.cat(row_idx)
-    col_idx = torch.cat(col_idx)
-    values = torch.cat(values)
-
-    indices = torch.stack([row_idx, col_idx], dim=0)
-    size = (dim * n_cells, dim * n_cells)
-
-    Sigma = torch.sparse_coo_tensor(indices, values, size, dtype=dtype, device=device)
-    return Sigma.coalesce()
+    return Sigma

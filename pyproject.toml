@@ -244,3 +244,8 @@ rst-roles = [
     'meth',
     'ref',
 ]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:Sparse CSR tensor support is in beta state.*:UserWarning"
+]
