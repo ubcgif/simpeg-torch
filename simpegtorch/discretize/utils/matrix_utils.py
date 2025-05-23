@@ -402,13 +402,16 @@ def get_diag(A):
     Parameters
     ----------
     A : torch.sparse.Tensor
-        A 2D sparse tensor in COO format.
+        A 2D sparse tensor, can be either CSR or COO format.
 
     Returns
     -------
     torch.Tensor
         A 1D dense tensor containing the diagonal elements. Zero if no value on the diagonal.
     """
+    if A.is_sparse_csr:
+        A = A.to_sparse_coo()
+
     if not A.is_sparse:
         raise TypeError("Input must be a sparse tensor.")
     if A.ndim != 2 or A.shape[0] != A.shape[1]:
@@ -436,6 +439,7 @@ def sdinv(M):
     ----------
     M : torch.sparse.Tensor
         A sparse diagonal matrix of shape (n, n)
+        Can be either COO or CSR format.
 
     Returns
     -------
@@ -451,6 +455,11 @@ def sdinv(M):
     ZeroDivisionError
         If the matrix contains zeros on the diagonal.
     """
+    sparse_type = "coo"
+    if M.is_sparse_csr:
+        M = M.to_sparse_coo()
+        sparse_type = "csr"
+
     if not M.is_sparse:
         raise TypeError("Input must be a torch sparse tensor.")
 
@@ -466,7 +475,7 @@ def sdinv(M):
     if (diag == 0).any():
         raise ZeroDivisionError("Cannot invert a diagonal matrix with zero entries.")
 
-    return sdiag(1.0 / diag)
+    return sdiag(1.0 / diag, sparse_type=sparse_type)
 
 
 def make_boundary_bool(shape, bdir="xyz"):
