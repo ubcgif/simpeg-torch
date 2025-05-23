@@ -960,6 +960,29 @@ class TensorType:
 
 
 def inverse_2x2_block_diagonal(a11, a12, a21, a22, return_matrix=True):
+    r"""
+    Compute the inverse of a 2x2 block diagonal matrix.
+    The input matrix is assumed to be of the form:
+    .. math::
+        \begin{bmatrix}
+        a_{11} & a_{12} \\
+        a_{21} & a_{22}
+        \end{bmatrix}
+
+    Parameters
+    ----------
+    a11, a12, a21, a22 : torch.Tensor
+        The components of the 2x2 block diagonal matrix.
+    return_matrix : bool, optional
+        If True, return the full matrix. If False, return the components of the inverse matrix.
+        Default is True.
+    Returns
+    -------
+    torch.Tensor
+        If return_matrix is True, returns the full inverse matrix.
+        If False, returns the components of the inverse matrix.
+
+    """
     # Vectorized determinant and inverse formula for 2x2 matrices
     a11 = mkvc(a11)
     a12 = mkvc(a12)
@@ -988,6 +1011,30 @@ def inverse_2x2_block_diagonal(a11, a12, a21, a22, return_matrix=True):
 def inverse_3x3_block_diagonal(
     a11, a12, a13, a21, a22, a23, a31, a32, a33, return_matrix=True
 ):
+    r"""Compute the inverse of a 3x3 block diagonal matrix.
+    The input matrix is assumed to be of the form:
+    .. math::
+        \begin{bmatrix}
+        a_{11} & a_{12} & a_{13} \\
+        a_{21} & a_{22} & a_{23} \\
+        a_{31} & a_{32} & a_{33}
+        \end{bmatrix}
+
+    Parameters
+    ----------
+    a11, a12, a13, a21, a22, a23, a31, a32, a33 : torch.Tensor
+        The components of the 3x3 block diagonal matrix.
+    return_matrix : bool, optional
+        If True, return the full matrix. If False, return the components of the inverse matrix.
+        Default is True.
+    Returns
+    -------
+    torch.Tensor
+        If return_matrix is True, returns the full inverse matrix.
+        If False, returns the components of the inverse matrix.
+    """
+    # Vectorized determinant and inverse formula for 3x3 matrices
+
     # Construct batched 3x3 matrices: shape (n, 3, 3)
     a11 = mkvc(a11)
     a12 = mkvc(a12)
