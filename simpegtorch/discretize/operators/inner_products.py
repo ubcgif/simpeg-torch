@@ -1,8 +1,9 @@
-from discretize.base import BaseMesh
-from discretize.utils import (
+from simpegtorch.discretize.base import BaseMesh
+from simpegtorch.discretize.utils import (
     # sub2ind,
     sdiag,
-    # kron,
+    kron,
+    speye,
     inverse_property_tensor,
     TensorType,
     make_property_tensor,
@@ -16,9 +17,7 @@ from discretize.utils import (
     # is_scalar,
 )
 
-# import torch
-import torch.sparse as sp
-import numpy as np
+import torch
 
 
 class InnerProducts(BaseMesh):
@@ -39,7 +38,6 @@ class InnerProducts(BaseMesh):
         model=None,
         invert_model=False,
         invert_matrix=False,
-        do_fast=True,
         **kwargs,
     ):
         """Get the inner product matrix.
@@ -48,7 +46,7 @@ class InnerProducts(BaseMesh):
         ----------
         str : projection_type
             'F' for faces 'E' for edges
-        numpy.ndarray : model
+        torch.tensor : model
             material property (tensor properties are possible) at each cell center (nC, (1, 3, or 6))
         bool : invert_model
             inverts the material property
@@ -66,25 +64,14 @@ class InnerProducts(BaseMesh):
         if projection_type not in ["F", "E"]:
             raise TypeError("projection_type must be 'F' for faces or 'E' for edges")
 
-        fast = None
-        if hasattr(self, "_fastInnerProduct") and do_fast:
-            fast = self._fastInnerProduct(
-                projection_type,
-                model=model,
-                invert_model=invert_model,
-                invert_matrix=invert_matrix,
-            )
-        if fast is not None:
-            return fast
-
         if invert_model:
             model = inverse_property_tensor(self, model)
 
         tensorType = TensorType(self, model)
 
-        Mu = make_property_tensor(self, model)
+        Mu = make_property_tensor(self, model, sparse_type="csr")
         Ps = self._getInnerProductProjectionMatrices(projection_type, tensorType)
-        A = np.sum([P.T * Mu * P for P in Ps])
+        A = torch.sum([P.T * Mu * P for P in Ps])
 
         if invert_matrix and tensorType < 3:
             A = sdinv(A)
@@ -114,7 +101,9 @@ class InnerProducts(BaseMesh):
 
         d = self.dim
         # We will multiply by sqrt on each side to keep symmetry
-        V = sp.kron(sp.identity(d), sdiag(np.sqrt((2 ** (-d)) * self.cell_volumes)))
+        V = kron(
+            speye(d), sdiag(torch.sqrt((2 ** (-d)) * self.cell_volumes)), format="csr"
+        )
 
         nodes = ["000", "100", "010", "110", "001", "101", "011", "111"][: 2**d]
 
