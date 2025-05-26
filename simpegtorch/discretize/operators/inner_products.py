@@ -32,13 +32,43 @@ class InnerProducts(BaseMesh):
     meshes using the appropriate method.
     """
 
+    def get_face_inner_product(  # NOQA D102
+        self,
+        model=None,
+        invert_model=False,
+        invert_matrix=False,
+        do_fast=True,
+    ):
+        return self._getInnerProduct(
+            "F",
+            model=model,
+            invert_model=invert_model,
+            invert_matrix=invert_matrix,
+            do_fast=do_fast,
+        )
+
+    def get_edge_inner_product(  # NOQA D102
+        self,
+        model=None,
+        invert_model=False,
+        invert_matrix=False,
+        do_fast=True,
+    ):
+        return self._getInnerProduct(
+            "E",
+            model=model,
+            invert_model=invert_model,
+            invert_matrix=invert_matrix,
+            do_fast=do_fast,
+        )
+
     def _getInnerProduct(
         self,
         projection_type,
         model=None,
         invert_model=False,
         invert_matrix=False,
-        **kwargs,
+        do_fast=False,
     ):
         """Get the inner product matrix.
 
@@ -63,6 +93,17 @@ class InnerProducts(BaseMesh):
 
         if projection_type not in ["F", "E"]:
             raise TypeError("projection_type must be 'F' for faces or 'E' for edges")
+
+        fast = None
+        if hasattr(self, "_fastInnerProduct") and do_fast:
+            fast = self._fastInnerProduct(
+                projection_type,
+                model=model,
+                invert_model=invert_model,
+                invert_matrix=invert_matrix,
+            )
+        if fast is not None:
+            return fast
 
         if invert_model:
             model = inverse_property_tensor(self, model)
