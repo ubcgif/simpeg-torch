@@ -632,7 +632,7 @@ def test_make_boundary_bool_3d():
     bool_ind = make_boundary_bool(shape)
     # Center point at (1,1,1) should not be a boundary
     assert (
-        bool_ind[13] is False
+        bool(bool_ind[13]) is False
     ), "3D center point should not be boundary"  # Index 13 is center in Fortran order
 
     # Test z boundaries only
