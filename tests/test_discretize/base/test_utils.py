@@ -4,6 +4,7 @@ import pytest
 
 from simpegtorch.discretize.utils import (
     sdiag,
+    sdinv,
     sub2ind,
     speye,
     av,
@@ -18,6 +19,8 @@ from simpegtorch.discretize.utils import (
     inverse_3x3_block_diagonal,
     inverse_property_tensor,
     make_property_tensor,
+    get_diag,
+    make_boundary_bool,
     # index_cube,
     ind2sub,
     as_array_n_by_dim,
@@ -529,3 +532,186 @@ def test_av_extrap():
         ]
     )
     assert torch.allclose(av_mat_dense, expected_av), "av matrix values are incorrect"
+
+
+def test_get_diag_identity():
+    # Test with identity matrix
+    I = speye(4)
+    diag = get_diag(I)
+    expected = torch.ones(4, dtype=torch.float64)
+    assert torch.allclose(diag, expected), "get_diag failed for identity matrix"
+
+
+def test_get_diag_diagonal():
+    # Test with arbitrary diagonal matrix
+    diag_values = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    S = sdiag(diag_values)
+    extracted_diag = get_diag(S)
+    assert torch.allclose(
+        extracted_diag, diag_values
+    ), "get_diag failed for diagonal matrix"
+
+
+def test_get_diag_sparse_with_zeros():
+    # Test with sparse matrix having zeros on diagonal
+    indices = torch.tensor([[0, 1, 2], [0, 1, 2]])
+    values = torch.tensor([1.0, 0.0, 3.0])
+    S = torch.sparse_coo_tensor(indices, values, (3, 3))
+
+    diag = get_diag(S)
+    expected = torch.tensor([1.0, 0.0, 3.0])
+    assert torch.allclose(diag, expected), "get_diag failed with zeros on diagonal"
+
+
+def test_get_diag_csr_format():
+    # Test with CSR format
+    diag_values = torch.tensor([2.0, -1.0, 5.0])
+    S = sdiag(diag_values, sparse_type="csr")
+    extracted_diag = get_diag(S)
+    assert torch.allclose(extracted_diag, diag_values), "get_diag failed for CSR format"
+
+
+def test_get_diag_empty_matrix():
+    # Test with matrix that has missing diagonal elements
+    indices = torch.tensor([[0, 2], [0, 2]])  # Missing diagonal at (1,1)
+    values = torch.tensor([1.0, 3.0])
+    S = torch.sparse_coo_tensor(indices, values, (3, 3))
+
+    diag = get_diag(S)
+    expected = torch.tensor([1.0, 0.0, 3.0])  # Should fill missing with 0
+    assert torch.allclose(
+        diag, expected
+    ), "get_diag failed with missing diagonal elements"
+
+
+def test_make_boundary_bool_1d():
+    # Test 1D case
+    shape = (5,)
+
+    # Test all boundaries (x only for 1D)
+    bool_ind = make_boundary_bool(shape, bdir="x")
+    expected = torch.tensor([True, False, False, False, True])
+    assert torch.equal(bool_ind, expected), "1D boundary bool failed for x direction"
+
+    # Test default (should be same as "xyz" but only x applies)
+    bool_ind_default = make_boundary_bool(shape)
+    assert torch.equal(
+        bool_ind_default, expected
+    ), "1D boundary bool failed for default"
+
+
+def test_make_boundary_bool_2d():
+    # Test 2D case - matches the original discretize example
+    shape = (3, 3)
+
+    # Test all boundaries (corrected expected values)
+    bool_ind = make_boundary_bool(shape)
+    expected = torch.tensor([True, True, True, True, False, True, True, True, True])
+    assert torch.equal(bool_ind, expected), "2D boundary bool failed for all directions"
+
+    # Test x boundaries only
+    bool_ind_x = make_boundary_bool(shape, bdir="x")
+    expected_x = torch.tensor([True, False, True, True, False, True, True, False, True])
+    assert torch.equal(
+        bool_ind_x, expected_x
+    ), "2D boundary bool failed for x direction"
+
+    # Test y boundaries only
+    bool_ind_y = make_boundary_bool(shape, bdir="y")
+    expected_y = torch.tensor([True, True, True, False, False, False, True, True, True])
+    assert torch.equal(
+        bool_ind_y, expected_y
+    ), "2D boundary bool failed for y direction"
+
+
+def test_make_boundary_bool_3d():
+    # Test 3D case with larger shape to have interior points
+    shape = (3, 3, 3)
+
+    # Test all boundaries
+    bool_ind = make_boundary_bool(shape)
+    # Center point at (1,1,1) should not be a boundary
+    assert (
+        bool_ind[13] is False
+    ), "3D center point should not be boundary"  # Index 13 is center in Fortran order
+
+    # Test z boundaries only
+    bool_ind_z = make_boundary_bool(shape, bdir="z")
+    # Should mark z=0 and z=2 planes (18 points total)
+    assert torch.sum(bool_ind_z).item() == 18, "3D z boundary count should be 18"
+
+    # For 2x2x2 case, all points are boundaries
+    shape_small = (2, 2, 2)
+    bool_ind_small = make_boundary_bool(shape_small)
+    expected_small = torch.ones(8, dtype=torch.bool)
+    assert torch.equal(
+        bool_ind_small, expected_small
+    ), "2x2x2 cube should have all boundary points"
+
+
+def test_make_boundary_bool_larger_3d():
+    # Test larger 3D case to better validate boundaries
+    shape = (3, 3, 3)
+
+    # Test x boundaries only
+    bool_ind_x = make_boundary_bool(shape, bdir="x")
+    # Should mark x=0 and x=2 planes
+    expected_count_x = 2 * 3 * 3  # Two 3x3 planes
+    assert (
+        torch.sum(bool_ind_x).item() == expected_count_x
+    ), "3D x boundary count incorrect"
+
+    # Test combined boundaries
+    bool_ind_xy = make_boundary_bool(shape, bdir="xy")
+    # Should have more boundary points than just x
+    assert torch.sum(bool_ind_xy) > torch.sum(
+        bool_ind_x
+    ), "3D xy boundary should be larger than x only"
+
+
+def test_make_boundary_bool_no_boundaries():
+    # Test with empty bdir string
+    shape = (3, 3)
+    bool_ind = make_boundary_bool(shape, bdir="")
+    expected = torch.zeros(9, dtype=torch.bool)
+    assert torch.equal(bool_ind, expected), "Empty bdir should return all False"
+
+
+def test_make_boundary_bool_partial_directions():
+    # Test various combinations of directions
+    shape = (3, 3, 3)
+
+    # Test "xz" combination
+    bool_ind_xz = make_boundary_bool(shape, bdir="xz")
+    bool_ind_x = make_boundary_bool(shape, bdir="x")
+    bool_ind_z = make_boundary_bool(shape, bdir="z")
+
+    # xz should be the union of x and z boundaries
+    expected_xz = bool_ind_x | bool_ind_z
+    assert torch.equal(
+        bool_ind_xz, expected_xz
+    ), "xz boundary should be union of x and z"
+
+
+def test_sdinv_basic():
+    # Test basic diagonal matrix inversion
+    diag_values = torch.tensor([2.0, 4.0, 0.5])
+    S = sdiag(diag_values)
+    S_inv = sdinv(S)
+
+    # Check that S * S_inv = I
+    product = S @ S_inv
+    expected_diag = torch.ones(3)
+    actual_diag = get_diag(product)
+    assert torch.allclose(
+        actual_diag, expected_diag
+    ), "sdinv should produce correct inverse"
+
+
+def test_sdinv_error_cases():
+    # Test error when matrix has zeros on diagonal
+    diag_values = torch.tensor([1.0, 0.0, 3.0])
+    S = sdiag(diag_values)
+
+    with pytest.raises(ZeroDivisionError):
+        sdinv(S)

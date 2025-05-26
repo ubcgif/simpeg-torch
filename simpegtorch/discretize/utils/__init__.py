@@ -123,6 +123,7 @@ from .matrix_utils import (
     make_boundary_bool,
     ind2sub,
     sub2ind,
+    get_diag,
     #     get_subarray,
     inverse_3x3_block_diagonal,
     inverse_2x2_block_diagonal,

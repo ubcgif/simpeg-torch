@@ -82,7 +82,7 @@ def sdiag(v, dtype=torch.float64, device=None, sparse_type="coo"):
         return tensor
 
 
-def speye(n, dtype=torch.float64, device=None):
+def speye(n, dtype=torch.float64, device=None, sparse_type="coo"):
     """
     Generate a sparse identity matrix using PyTorch.
 
@@ -100,7 +100,12 @@ def speye(n, dtype=torch.float64, device=None):
     torch.sparse.Tensor
         A (n, n) sparse identity tensor.
     """
-    return sdiag(torch.ones(n, dtype=dtype, device=device), dtype=dtype, device=device)
+    return sdiag(
+        torch.ones(n, dtype=dtype, device=device),
+        dtype=dtype,
+        device=device,
+        sparse_type=sparse_type,
+    )
 
 
 def kron(A, B, sparse_type="coo"):
