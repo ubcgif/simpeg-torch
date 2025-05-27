@@ -1136,6 +1136,42 @@ def inverse_property_tensor(
     return T
 
 
+def get_subarray(A, ind):
+    """Extract a subarray from a PyTorch tensor.
+
+    For a torch.Tensor, the function get_subarray extracts a subset of
+    the tensor. The portion of the original tensor being extracted is defined
+    by providing the indices along each axis.
+
+    Parameters
+    ----------
+    A : torch.Tensor
+        The original tensor. Must be 1, 2 or 3 dimensions.
+    ind : list of array-like
+        A list of arrays containing the indices being extracted along each
+        dimension. The length of the list must equal the dimensions of the input tensor.
+
+    Returns
+    -------
+    torch.Tensor
+        The subtensor extracted from the original tensor
+    """
+    if not isinstance(ind, list):
+        raise TypeError("ind must be a list of vectors")
+    if len(A.shape) != len(ind):
+        raise ValueError("ind must have the same length as the dimension of A")
+
+    # Convert indices to tensors
+    ind = [torch.as_tensor(i, dtype=torch.long) for i in ind]
+
+    if len(A.shape) == 2:
+        return A[ind[0], :][:, ind[1]]
+    elif len(A.shape) == 3:
+        return A[ind[0], :, :][:, ind[1], :][:, :, ind[2]]
+    else:
+        raise Exception("get_subarray does not support dimension asked.")
+
+
 def make_property_tensor(
     mesh, tensor, dtype=torch.float64, device=None, sparse_type="coo"
 ):

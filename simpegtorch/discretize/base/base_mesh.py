@@ -36,6 +36,13 @@ class BaseMesh:
         "aveN2F": "average_node_to_face",
     }
 
+    def __getattr__(self, name):
+        """Reimplement get attribute to allow for aliases."""
+        if name == "_aliases":
+            raise AttributeError
+        name = self._aliases.get(name, name)
+        return super().__getattribute__(name)
+
     def to_dict(self):
         """Represent the mesh's attributes as a dictionary.
 

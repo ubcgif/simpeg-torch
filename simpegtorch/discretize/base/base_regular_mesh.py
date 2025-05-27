@@ -5,6 +5,20 @@ from ..utils import atleast_1d, Identity
 
 
 class BaseRegularMesh(BaseMesh):
+
+    _aliases = {
+        **BaseMesh._aliases,
+        "nEx": "n_edges_x",
+        "nEy": "n_edges_y",
+        "nEz": "n_edges_z",
+        "vnE": "n_edges_per_direction",
+        "nFx": "n_faces_x",
+        "nFy": "n_faces_y",
+        "nFz": "n_faces_z",
+        "vnF": "n_faces_per_direction",
+        "vnC": "shape_cells",
+    }
+
     _items = {"shape_cells", "origin", "orientation", "reference_system"}
 
     def __init__(
@@ -586,6 +600,19 @@ class BaseRectangularMesh(BaseRegularMesh):
     The ``BaseRectangularMesh`` class acts as an extension of the
     :class:`~discretize.base.BaseRegularMesh` classes with a regular structure.
     """
+
+    _aliases = {
+        **BaseRegularMesh._aliases,
+        **{
+            "vnN": "shape_nodes",
+            "vnEx": "shape_edges_x",
+            "vnEy": "shape_edges_y",
+            "vnEz": "shape_edges_z",
+            "vnFx": "shape_faces_x",
+            "vnFy": "shape_faces_y",
+            "vnFz": "shape_faces_z",
+        },
+    }
 
     @property
     def shape_nodes(self):
