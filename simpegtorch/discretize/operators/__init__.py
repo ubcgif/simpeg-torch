@@ -17,3 +17,4 @@ Operator Classes
 """
 
 from .inner_products import InnerProducts
+from .differential_operators import DiffOperators
