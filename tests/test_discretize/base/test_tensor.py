@@ -9,40 +9,57 @@ gen = torch.Generator().manual_seed(123)
 torch.set_default_dtype(torch.float64)
 
 
-@pytest.fixture(scope="module")
-def setup_meshes():
-    a = torch.tensor([1.0, 1.0, 1.0])
-    b = torch.tensor([1.0, 2.0])
-    c = torch.tensor([1.0, 4.0])
-    mesh2 = discretize.TensorMesh([a, b], [3, 5])
-    mesh3 = discretize.TensorMesh([a, b, c])
+# Device fixtures for testing across different devices
+@pytest.fixture(params=["cpu"] + (["cuda"] if torch.cuda.is_available() else []))
+def device(request):
+    """Pytest fixture to test on CPU and CUDA (if available)."""
+    return torch.device(request.param)
+
+
+@pytest.fixture(
+    scope="module", params=["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+)
+def setup_meshes(request):
+    device = torch.device(request.param)
+    a = torch.tensor([1.0, 1.0, 1.0], device=device)
+    b = torch.tensor([1.0, 2.0], device=device)
+    c = torch.tensor([1.0, 4.0], device=device)
+    mesh2 = discretize.TensorMesh([a, b], [3, 5], device=device)
+    mesh3 = discretize.TensorMesh([a, b, c], device=device)
     return mesh2, mesh3
 
 
 def test_gridded_2D(setup_meshes):
     mesh2, _ = setup_meshes
     H = mesh2.h_gridded
-    test_hx = torch.all(H[:, 0] == torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0]))
-    test_hy = torch.all(H[:, 1] == torch.tensor([1.0, 1.0, 1.0, 2.0, 2.0, 2.0]))
+    expected_hx = torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0], device=mesh2.device)
+    expected_hy = torch.tensor([1.0, 1.0, 1.0, 2.0, 2.0, 2.0], device=mesh2.device)
+    test_hx = torch.all(H[:, 0] == expected_hx)
+    test_hy = torch.all(H[:, 1] == expected_hy)
     assert test_hx and test_hy
+    assert H.device == torch.device(mesh2.device)
 
 
 def test_gridded_3D(setup_meshes):
     _, mesh3 = setup_meshes
     H = mesh3.h_gridded
-    test_hx = torch.all(
-        H[:, 0]
-        == torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    expected_hx = torch.tensor(
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        device=mesh3.device,
     )
-    test_hy = torch.all(
-        H[:, 1]
-        == torch.tensor([1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0])
+    expected_hy = torch.tensor(
+        [1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0],
+        device=mesh3.device,
     )
-    test_hz = torch.all(
-        H[:, 2]
-        == torch.tensor([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0])
+    expected_hz = torch.tensor(
+        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
+        device=mesh3.device,
     )
+    test_hx = torch.all(H[:, 0] == expected_hx)
+    test_hy = torch.all(H[:, 1] == expected_hy)
+    test_hz = torch.all(H[:, 2] == expected_hz)
     assert test_hx and test_hy and test_hz
+    assert H.device == torch.device(mesh3.device)
 
 
 def test_vectorN_2D(setup_meshes):

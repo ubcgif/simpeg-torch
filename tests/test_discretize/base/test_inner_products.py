@@ -3,100 +3,132 @@ import pytest
 from simpegtorch.discretize import TensorMesh
 
 
+# Device fixtures for testing across different devices
+@pytest.fixture(params=["cpu"] + (["cuda"] if torch.cuda.is_available() else []))
+def device(request):
+    """Pytest fixture to test on CPU and CUDA (if available)."""
+    return torch.device(request.param)
+
+
+@pytest.fixture
+def dtype():
+    """Default dtype for tests."""
+    return torch.float64
+
+
 class TestBasicInnerProducts:
     """Basic tests for inner product functionality."""
 
-    def test_face_inner_product_1d(self):
+    def test_face_inner_product_1d(self, device, dtype):
         """Test 1D face inner product with isotropic model."""
-        mesh = TensorMesh([10])
+        mesh = TensorMesh([10], device=device, dtype=dtype)
 
         # Test with default (ones) model
         A_default = mesh.get_face_inner_product()
         assert A_default.shape == (mesh.n_faces, mesh.n_faces)
         assert A_default.is_sparse
+        assert A_default.device == device
 
         # Test with scalar model
         sigma = 2.0
         A_scalar = mesh.get_face_inner_product(sigma)
         assert A_scalar.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_scalar.device == device
 
         # Test with vector model
-        sigma_vec = torch.ones(mesh.n_cells) * 3.0
+        sigma_vec = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 3.0
         A_vector = mesh.get_face_inner_product(sigma_vec)
         assert A_vector.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_vector.device == device
 
-    def test_face_inner_product_2d(self):
+    def test_face_inner_product_2d(self, device, dtype):
         """Test 2D face inner product with different tensor types."""
-        mesh = TensorMesh([8, 8])
+        mesh = TensorMesh([8, 8], device=device, dtype=dtype)
 
         # Isotropic
-        sigma_iso = torch.ones(mesh.n_cells) * 2.0
+        sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_face_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_iso.device == device
 
         # Anisotropic (diagonal)
-        sigma_aniso = torch.ones(mesh.n_cells * 2) * 2.0  # [sigma_x, sigma_y]
+        sigma_aniso = (
+            torch.ones(mesh.n_cells * 2, device=device, dtype=dtype) * 2.0
+        )  # [sigma_x, sigma_y]
         A_aniso = mesh.get_face_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_faces, mesh.n_faces)
-
-        # Full tensor
-        sigma_tensor = torch.ones(mesh.n_cells * 3)  # [sigma_xx, sigma_yy, sigma_xy]
-        A_tensor = mesh.get_face_inner_product(sigma_tensor)
-        assert A_tensor.shape == (mesh.n_faces, mesh.n_faces)
-
-    def test_face_inner_product_3d(self):
-        """Test 3D face inner product with different tensor types."""
-        mesh = TensorMesh([4, 4, 4])
-
-        # Isotropic
-        sigma_iso = torch.ones(mesh.n_cells) * 2.0
-        A_iso = mesh.get_face_inner_product(sigma_iso)
-        assert A_iso.shape == (mesh.n_faces, mesh.n_faces)
-
-        # Anisotropic (diagonal)
-        sigma_aniso = torch.ones(mesh.n_cells * 3) * 2.0  # [sigma_x, sigma_y, sigma_z]
-        A_aniso = mesh.get_face_inner_product(sigma_aniso)
-        assert A_aniso.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_aniso.device == device
 
         # Full tensor
         sigma_tensor = torch.ones(
-            mesh.n_cells * 6
+            mesh.n_cells * 3, device=device, dtype=dtype
+        )  # [sigma_xx, sigma_yy, sigma_xy]
+        A_tensor = mesh.get_face_inner_product(sigma_tensor)
+        assert A_tensor.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_tensor.device == device
+
+    def test_face_inner_product_3d(self, device, dtype):
+        """Test 3D face inner product with different tensor types."""
+        mesh = TensorMesh([4, 4, 4], device=device, dtype=dtype)
+
+        # Isotropic
+        sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
+        A_iso = mesh.get_face_inner_product(sigma_iso)
+        assert A_iso.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_iso.device == device
+
+        # Anisotropic (diagonal)
+        sigma_aniso = (
+            torch.ones(mesh.n_cells * 3, device=device, dtype=dtype) * 2.0
+        )  # [sigma_x, sigma_y, sigma_z]
+        A_aniso = mesh.get_face_inner_product(sigma_aniso)
+        assert A_aniso.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_aniso.device == device
+
+        # Full tensor
+        sigma_tensor = torch.ones(
+            mesh.n_cells * 6, device=device, dtype=dtype
         )  # [sigma_xx, sigma_yy, sigma_zz, sigma_xy, sigma_xz, sigma_yz]
         A_tensor = mesh.get_face_inner_product(sigma_tensor)
         assert A_tensor.shape == (mesh.n_faces, mesh.n_faces)
+        assert A_tensor.device == device
 
-    def test_edge_inner_product_2d(self):
+    def test_edge_inner_product_2d(self, device, dtype):
         """Test 2D edge inner product."""
-        mesh = TensorMesh([8, 8])
+        mesh = TensorMesh([8, 8], device=device, dtype=dtype)
 
         # Isotropic
-        sigma_iso = torch.ones(mesh.n_cells) * 2.0
+        sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_edge_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_iso.device == device
 
         # Anisotropic
-        sigma_aniso = torch.ones(mesh.n_cells * 2) * 2.0
+        sigma_aniso = torch.ones(mesh.n_cells * 2, device=device, dtype=dtype) * 2.0
         A_aniso = mesh.get_edge_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_aniso.device == device
 
-    def test_edge_inner_product_3d(self):
+    def test_edge_inner_product_3d(self, device, dtype):
         """Test 3D edge inner product."""
-        mesh = TensorMesh([4, 4, 4])
+        mesh = TensorMesh([4, 4, 4], device=device, dtype=dtype)
 
         # Isotropic
-        sigma_iso = torch.ones(mesh.n_cells) * 2.0
+        sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_edge_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_iso.device == device
 
         # Anisotropic
-        sigma_aniso = torch.ones(mesh.n_cells * 3) * 2.0
+        sigma_aniso = torch.ones(mesh.n_cells * 3, device=device, dtype=dtype) * 2.0
         A_aniso = mesh.get_edge_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_aniso.device == device
 
-    def test_invert_model_flag(self):
+    def test_invert_model_flag(self, device, dtype):
         """Test the invert_model flag."""
-        mesh = TensorMesh([4, 4])
-        sigma = torch.ones(mesh.n_cells) * 2.0
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+        sigma = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
 
         # Normal
         # A1 = mesh.get_face_inner_product(sigma)
@@ -108,11 +140,13 @@ class TestBasicInnerProducts:
         # A2 and A3 should be approximately equal
         diff = (A2 - A3).to_dense().abs().max()
         assert diff < 1e-10
+        assert A2.device == device
+        assert A3.device == device
 
-    def test_invert_matrix_flag(self):
+    def test_invert_matrix_flag(self, device, dtype):
         """Test the invert_matrix flag."""
-        mesh = TensorMesh([4, 4])
-        sigma = torch.ones(mesh.n_cells) * 2.0
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+        sigma = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
 
         # Normal
         A = mesh.get_face_inner_product(sigma)
@@ -126,14 +160,21 @@ class TestBasicInnerProducts:
 
         # Diagonal should be close to 1
         assert torch.allclose(diag_vals, torch.ones_like(diag_vals), atol=1e-10)
+        assert A.device == device
+        assert A_inv.device == device
 
 
 class TestInnerProductIntegration:
     """Integration tests comparing analytical and numerical results."""
 
-    def test_1d_face_integration(self):
+    @pytest.mark.parametrize(
+        "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+    )
+    def test_1d_face_integration(self, device):
         """Test 1D face inner product integration."""
-        mesh = TensorMesh([32])  # Fine mesh for accuracy
+        device = torch.device(device)
+        dtype = torch.float64
+        mesh = TensorMesh([32], device=device, dtype=dtype)  # Fine mesh for accuracy
 
         # Define function: f(x) = x^2 + 60 (y=12, z=5 from original)
         def ex_func(x):
@@ -145,9 +186,9 @@ class TestInnerProductIntegration:
 
         # Evaluate functions at grid points
         sigma = torch.tensor(
-            [sigma_func(x) for x in mesh.cell_centers_x], dtype=torch.float64
+            [sigma_func(x) for x in mesh.cell_centers_x], dtype=dtype, device=device
         )
-        F = torch.tensor([ex_func(x) for x in mesh.faces_x], dtype=torch.float64)
+        F = torch.tensor([ex_func(x) for x in mesh.faces_x], dtype=dtype, device=device)
 
         # Get inner product matrix
         A = mesh.get_face_inner_product(sigma)
@@ -244,16 +285,22 @@ class TestInnerProductIntegration:
 class TestInnerProductProperties:
     """Test mathematical properties of inner products."""
 
-    def test_symmetry(self):
+    @pytest.mark.parametrize(
+        "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+    )
+    def test_symmetry(self, device):
         """Test that inner product matrices are symmetric."""
-        mesh = TensorMesh([8, 8])
-        sigma = torch.ones(mesh.n_cells) * 2.0
+        device = torch.device(device)
+        dtype = torch.float64
+        mesh = TensorMesh([8, 8], device=device, dtype=dtype)
+        sigma = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
 
         A = mesh.get_face_inner_product(sigma)
         A_dense = A.to_dense()
 
         # Check symmetry
         assert torch.allclose(A_dense, A_dense.T, atol=1e-12)
+        assert A.device == device
 
     def test_positive_definiteness(self):
         """Test that inner product matrices are positive definite."""
@@ -284,9 +331,14 @@ class TestInnerProductProperties:
 class TestInnerProductProjectionMatrices:
     """Test the projection matrix functions."""
 
-    def test_face_projection_1d(self):
+    @pytest.mark.parametrize(
+        "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+    )
+    def test_face_projection_1d(self, device):
         """Test 1D face projection matrices."""
-        mesh = TensorMesh([4])
+        device = torch.device(device)
+        dtype = torch.float64
+        mesh = TensorMesh([4], device=device, dtype=dtype)
 
         # Test _getFacePx
         Px = mesh._getFacePx()
@@ -299,6 +351,8 @@ class TestInnerProductProjectionMatrices:
         assert P_fXp.shape == (mesh.n_cells, mesh.n_faces)
         assert P_fXm.is_sparse
         assert P_fXp.is_sparse
+        assert P_fXm.device == device
+        assert P_fXp.device == device
 
     def test_face_projection_2d(self):
         """Test 2D face projection matrices."""
@@ -361,13 +415,20 @@ class TestInnerProductProjectionMatrices:
 class TestErrorHandling:
     """Test error handling and edge cases."""
 
-    def test_invalid_tensor_size(self):
+    @pytest.mark.parametrize(
+        "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+    )
+    def test_invalid_tensor_size(self, device):
         """Test that invalid tensor sizes raise appropriate errors."""
-        mesh = TensorMesh([4, 4])
+        device = torch.device(device)
+        dtype = torch.float64
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
 
         # Wrong size for 2D mesh
         with pytest.raises(Exception):
-            wrong_size_tensor = torch.ones(mesh.n_cells * 5)  # Invalid size
+            wrong_size_tensor = torch.ones(
+                mesh.n_cells * 5, device=device, dtype=dtype
+            )  # Invalid size
             mesh.get_face_inner_product(wrong_size_tensor)
 
     def test_invalid_projection_type(self):
