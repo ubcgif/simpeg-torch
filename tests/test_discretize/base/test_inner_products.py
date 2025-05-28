@@ -163,6 +163,88 @@ class TestBasicInnerProducts:
         assert A.device == device
         assert A_inv.device == device
 
+    def test_edge_inner_product_surface_1d(self, device, dtype):
+        """Test 1D edge inner product surface with isotropic model."""
+        mesh = TensorMesh([10], device=device, dtype=dtype)
+
+        # Test with default (ones) model
+        A_default = mesh.get_edge_inner_product_surface()
+        assert A_default.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_default.is_sparse
+        assert A_default.device == device
+
+        # Test with scalar model
+        tau = 2.0
+        A_scalar = mesh.get_edge_inner_product_surface(tau)
+        assert A_scalar.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_scalar.device == device
+
+        # Test with vector model
+        tau_vec = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 3.0
+        A_vector = mesh.get_edge_inner_product_surface(tau_vec)
+        assert A_vector.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_vector.device == device
+
+    def test_edge_inner_product_surface_2d(self, device, dtype):
+        """Test 2D edge inner product surface."""
+        mesh = TensorMesh([8, 8], device=device, dtype=dtype)
+
+        # Test with default model
+        A_default = mesh.get_edge_inner_product_surface()
+        assert A_default.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_default.device == device
+
+        # Test with edge-based model
+        tau = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 2.0
+        A = mesh.get_edge_inner_product_surface(tau)
+        assert A.shape == (mesh.n_edges, mesh.n_edges)
+        assert A.device == device
+
+    def test_edge_inner_product_surface_3d(self, device, dtype):
+        """Test 3D edge inner product surface."""
+        mesh = TensorMesh([4, 4, 4], device=device, dtype=dtype)
+
+        # Test with default model
+        A_default = mesh.get_edge_inner_product_surface()
+        assert A_default.shape == (mesh.n_edges, mesh.n_edges)
+        assert A_default.device == device
+
+        # Test with edge-based model
+        tau = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 2.0
+        A = mesh.get_edge_inner_product_surface(tau)
+        assert A.shape == (mesh.n_edges, mesh.n_edges)
+        assert A.device == device
+
+    def test_edge_inner_product_surface_flags(self, device, dtype):
+        """Test edge inner product surface with invert flags."""
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+        tau = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 2.0
+
+        # Normal
+        A = mesh.get_edge_inner_product_surface(tau)
+
+        # With invert_model=True (should be equivalent to passing 1/tau)
+        A2 = mesh.get_edge_inner_product_surface(tau, invert_model=True)
+        A3 = mesh.get_edge_inner_product_surface(1.0 / tau)
+
+        # A2 and A3 should be approximately equal
+        diff = (A2 - A3).to_dense().abs().max()
+        assert diff < 1e-10
+        assert A2.device == device
+        assert A3.device == device
+
+        # With invert_matrix=True
+        A_inv = mesh.get_edge_inner_product_surface(tau, invert_matrix=True)
+
+        # Should be approximately inverse
+        identity_approx = torch.sparse.mm(A.to_sparse_coo(), A_inv.to_sparse_coo())
+        diag_vals = identity_approx.to_dense().diag()
+
+        # Diagonal should be close to 1
+        assert torch.allclose(diag_vals, torch.ones_like(diag_vals), atol=1e-10)
+        assert A.device == device
+        assert A_inv.device == device
+
 
 class TestInnerProductIntegration:
     """Integration tests comparing analytical and numerical results."""
@@ -445,3 +527,16 @@ class TestErrorHandling:
 
         with pytest.raises(TypeError):
             Px("eX1")  # Invalid edge name for 1D
+
+    def test_edge_inner_product_surface_invalid_size(self, device):
+        """Test that invalid edge model sizes raise appropriate errors."""
+        device = torch.device(device)
+        dtype = torch.float64
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+
+        # Wrong size for edge model
+        with pytest.raises(ValueError):
+            wrong_size_tensor = torch.ones(
+                mesh.n_edges + 5, device=device, dtype=dtype
+            )  # Invalid size
+            mesh.get_edge_inner_product_surface(wrong_size_tensor)

@@ -12,8 +12,8 @@ from simpegtorch.discretize.utils import (
     # get_subarray,
     # inverse_3x3_block_diagonal,
     sdinv,
-    # mkvc,
-    # is_scalar,
+    mkvc,
+    is_scalar,
 )
 
 import torch
@@ -333,6 +333,67 @@ class InnerProducts(BaseMesh):
             return PXXX
 
         return Pxxx
+
+    def get_edge_inner_product_surface(
+        self,
+        model=None,
+        invert_model=False,
+        invert_matrix=False,
+    ):
+        """Generate the edge inner product surface matrix or its inverse.
+
+        This method generates the inner product surface matrix (or its inverse)
+        when discrete variables are defined on mesh edges. It constructs
+        the inner product surface matrix when diagnostic properties
+        (e.g. conductance) are defined on mesh edges.
+
+        Parameters
+        ----------
+        model : None or torch.Tensor
+            Parameters defining the diagnostic properties for every edge in the mesh.
+            Inner product surface matrices can be constructed for the following cases:
+
+            - *None* : returns the basic inner product surface matrix
+            - *(n_edges)* torch.Tensor : returns inner product surface matrix
+              for an isotropic model. The array contains a scalar diagnostic property value
+              for each edge.
+
+        invert_model : bool, optional
+            The inverse of *model* is used as the diagnostic property.
+        invert_matrix : bool, optional
+            Returns the inverse of the inner product surface matrix.
+
+        Returns
+        -------
+        torch.sparse.COOTensor
+            Inner product surface matrix of shape (n_edges, n_edges)
+        """
+
+        edge_lengths = self.edge_lengths
+        if model is None:
+            model = torch.ones(self.n_edges, device=self.device, dtype=self.dtype)
+
+        if invert_model:
+            model = 1.0 / model
+
+        if is_scalar(model):
+            model = model * torch.ones(
+                self.n_edges, device=self.device, dtype=self.dtype
+            )
+
+        # Isotropic case only
+        if model.numel() != self.n_edges:
+            raise ValueError(
+                f"Unexpected shape of tensor: {model.shape}. "
+                f"Must be scalar or have length equal to total number of edges ({self.n_edges})."
+            )
+
+        M = sdiag(edge_lengths * mkvc(model), sparse_type="coo")
+
+        if invert_matrix:
+            return sdinv(M)
+        else:
+            return M
 
     def _getEdgePx(M):
         """Return a function for creating edge projection matrices in 1D."""
