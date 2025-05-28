@@ -494,6 +494,286 @@ class TestInnerProductProjectionMatrices:
         assert P.is_sparse
 
 
+class TestInnerProductDerivatives:
+    """Test derivatives of inner products using PyTorch automatic differentiation."""
+
+    def test_face_inner_product_derivative_1d(self, device, dtype):
+        """Test 1D face inner product derivative with respect to model parameters."""
+        device = torch.device(device)
+        mesh = TensorMesh([8], device=device, dtype=dtype)
+
+        # Create model parameter with gradient tracking
+        sigma = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 2.0
+        )
+
+        # Create test vector
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Compute inner product: u^T @ A(sigma) @ u
+        A = mesh.get_face_inner_product(sigma)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Compute gradient using autograd
+        grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
+
+        # Verify gradient shape and properties
+        assert grad_auto.shape == sigma.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+        assert not torch.isinf(grad_auto).any()
+
+    def test_face_inner_product_derivative_2d_isotropic(self, device, dtype):
+        """Test 2D face inner product derivative for isotropic model."""
+        device = torch.device(device)
+        mesh = TensorMesh([6, 6], device=device, dtype=dtype)
+
+        # Isotropic model with gradient tracking
+        sigma = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 3.0
+        )
+
+        # Test vectors
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+        v = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Compute bilinear form: u^T @ A(sigma) @ v
+        A = mesh.get_face_inner_product(sigma)
+        bilinear_form = torch.dot(u, A.to_dense() @ v)
+
+        # Compute gradient
+        grad_auto = torch.autograd.grad(bilinear_form, sigma, create_graph=True)[0]
+
+        assert grad_auto.shape == sigma.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+
+    def test_face_inner_product_derivative_2d_anisotropic(self, device, dtype):
+        """Test 2D face inner product derivative for anisotropic model."""
+        device = torch.device(device)
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+
+        # Anisotropic model: [sigma_x, sigma_y] for each cell
+        sigma = (
+            torch.ones(mesh.n_cells * 2, device=device, dtype=dtype, requires_grad=True)
+            * 2.0
+        )
+
+        # Test vector
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Compute quadratic form
+        A = mesh.get_face_inner_product(sigma)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Compute gradient
+        grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
+
+        assert grad_auto.shape == sigma.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+
+    def test_face_inner_product_derivative_3d_isotropic(self, device, dtype):
+        """Test 3D face inner product derivative for isotropic model."""
+        device = torch.device(device)
+        mesh = TensorMesh([3, 3, 3], device=device, dtype=dtype)
+
+        # Isotropic model
+        sigma = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 1.5
+        )
+
+        # Test vector
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Compute quadratic form
+        A = mesh.get_face_inner_product(sigma)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Compute gradient
+        grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
+
+        assert grad_auto.shape == sigma.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+
+    def test_edge_inner_product_derivative_2d(self, device, dtype):
+        """Test 2D edge inner product derivative."""
+        device = torch.device(device)
+        mesh = TensorMesh([6, 6], device=device, dtype=dtype)
+
+        # Isotropic model for edges
+        sigma = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 2.5
+        )
+
+        # Test vector
+        u = torch.randn(mesh.n_edges, device=device, dtype=dtype)
+
+        # Compute quadratic form
+        A = mesh.get_edge_inner_product(sigma)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Compute gradient
+        grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
+
+        assert grad_auto.shape == sigma.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+
+    def test_edge_inner_product_derivative_3d(self, device, dtype):
+        """Test 3D edge inner product derivative."""
+        device = torch.device(device)
+        mesh = TensorMesh([3, 3, 3], device=device, dtype=dtype)
+
+        # Anisotropic model for edges: [sigma_x, sigma_y, sigma_z]
+        sigma = (
+            torch.ones(mesh.n_cells * 3, device=device, dtype=dtype, requires_grad=True)
+            * 1.8
+        )
+
+        # Test vector
+        u = torch.randn(mesh.n_edges, device=device, dtype=dtype)
+
+        # Compute quadratic form
+        A = mesh.get_edge_inner_product(sigma)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Compute gradient
+        grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
+
+        assert grad_auto.shape == sigma.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+
+    def test_edge_inner_product_surface_derivative(self, device, dtype):
+        """Test edge inner product surface derivative."""
+        device = torch.device(device)
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+
+        # Edge-based model parameter
+        tau = (
+            torch.ones(mesh.n_edges, device=device, dtype=dtype, requires_grad=True)
+            * 1.2
+        )
+
+        # Test vector
+        u = torch.randn(mesh.n_edges, device=device, dtype=dtype)
+
+        # Compute quadratic form
+        A = mesh.get_edge_inner_product_surface(tau)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Compute gradient
+        grad_auto = torch.autograd.grad(quadratic_form, tau, create_graph=True)[0]
+
+        assert grad_auto.shape == tau.shape
+        assert grad_auto.device == device
+        assert not torch.isnan(grad_auto).any()
+
+    def test_gradient_flow_preservation(self, device, dtype):
+        """Test that gradients flow properly through inner product operations."""
+        device = torch.device(device)
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+
+        # Model parameter
+        sigma = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 2.0
+        )
+
+        # Test vector
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Compute quadratic form
+        A = mesh.get_face_inner_product(sigma)
+        quadratic_form = torch.dot(u, A.to_dense() @ u)
+
+        # Verify that the gradient can be computed multiple times
+        grad1 = torch.autograd.grad(quadratic_form, sigma, retain_graph=True)[0]
+        grad2 = torch.autograd.grad(quadratic_form, sigma, retain_graph=True)[0]
+
+        # Gradients should be identical when computed multiple times
+        assert torch.allclose(grad1, grad2, atol=1e-12)
+        assert grad1.shape == sigma.shape
+        assert grad1.device == device
+        assert not torch.isnan(grad1).any()
+
+    def test_derivative_linearity(self, device, dtype):
+        """Test linearity property of derivatives."""
+        device = torch.device(device)
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+
+        # Two different model parameters
+        sigma1 = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 1.0
+        )
+        sigma2 = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 2.0
+        )
+
+        # Scalars for linear combination
+        a, b = 2.0, 3.0
+
+        # Test vector
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Compute derivatives for linear combination: a*sigma1 + b*sigma2
+        sigma_combined = a * sigma1 + b * sigma2
+        A_combined = mesh.get_face_inner_product(sigma_combined)
+        quad_combined = torch.dot(u, A_combined.to_dense() @ u)
+
+        # This tests that the derivative computation works for linear combinations
+        grad_combined = torch.autograd.grad(
+            quad_combined, [sigma1, sigma2], create_graph=True
+        )
+
+        assert len(grad_combined) == 2
+        assert grad_combined[0].shape == sigma1.shape
+        assert grad_combined[1].shape == sigma2.shape
+        assert grad_combined[0].device == device
+        assert grad_combined[1].device == device
+
+    def test_derivative_with_different_vector_operations(self, device, dtype):
+        """Test derivatives with different vector operations."""
+        device = torch.device(device)
+        mesh = TensorMesh([4, 4], device=device, dtype=dtype)
+
+        # Model parameter
+        sigma = (
+            torch.ones(mesh.n_cells, device=device, dtype=dtype, requires_grad=True)
+            * 1.5
+        )
+
+        # Test vectors
+        u = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+        v = torch.randn(mesh.n_faces, device=device, dtype=dtype)
+
+        # Get inner product matrix
+        A = mesh.get_face_inner_product(sigma)
+        A_dense = A.to_dense()
+
+        # Test different operations
+        operations = [
+            torch.dot(u, A_dense @ u),  # Quadratic form
+            torch.dot(u, A_dense @ v),  # Bilinear form
+            torch.trace(A_dense),  # Trace
+            torch.sum(torch.diagonal(A_dense)),  # Sum of diagonal
+        ]
+
+        for i, op in enumerate(operations):
+            grad_auto = torch.autograd.grad(op, sigma, retain_graph=True)[0]
+            assert grad_auto.shape == sigma.shape, f"Failed for operation {i}"
+            assert grad_auto.device == device, f"Failed for operation {i}"
+            assert not torch.isnan(grad_auto).any(), f"Failed for operation {i}"
+
+
 class TestErrorHandling:
     """Test error handling and edge cases."""
 
