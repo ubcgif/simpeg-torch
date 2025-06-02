@@ -108,6 +108,47 @@ def speye(n, dtype=torch.float64, device=None, sparse_type="coo"):
     )
 
 
+def spzeros(n1, n2, dtype=torch.float64, device=None, sparse_type="coo"):
+    """Generate sparse matrix of zeros of shape=(n1, n2).
+
+    Parameters
+    ----------
+    n1 : int
+        Number of rows.
+    n2 : int
+        Number of columns.
+    dtype : torch.dtype, optional
+        Data type of the tensor.
+    device : torch.device, optional
+        Device to store the tensor on.
+    sparse_type : {'coo', 'csr'}, optional
+        Output sparse format.
+
+    Returns
+    -------
+    torch.sparse.Tensor
+        A sparse matrix of zeros.
+    """
+    if device is None:
+        device = "cpu"
+
+    # Create empty indices and values for a sparse zero matrix
+    indices = torch.empty((2, 0), dtype=torch.long, device=device)
+    values = torch.empty(0, dtype=dtype, device=device)
+
+    if sparse_type == "coo":
+        return torch.sparse_coo_tensor(
+            indices, values, (n1, n2), dtype=dtype, device=device
+        )
+    elif sparse_type == "csr":
+        coo = torch.sparse_coo_tensor(
+            indices, values, (n1, n2), dtype=dtype, device=device
+        )
+        return coo.to_sparse_csr()
+    else:
+        raise ValueError(f"sparse_type must be 'coo' or 'csr', got {sparse_type}")
+
+
 def kron(A, B, sparse_type="coo"):
     """
 

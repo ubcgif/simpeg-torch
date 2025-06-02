@@ -7,6 +7,17 @@ differentiation and GPU acceleration.
 
 import torch
 from simpegtorch.discretize.base import BaseMesh
+from simpegtorch.discretize.utils import (
+    sdiag,
+    kron,
+    kron3,
+    speye,
+    # spzeros,
+    ddx,
+    # av,
+    # av_extrap,
+    # make_boundary_bool,
+)
 
 
 def _validate_BC(bc):
@@ -87,9 +98,66 @@ def _ddxCellGrad(n, bc, device=None, dtype=None):
     D = D.coalesce()
 
     # Set boundary conditions
-    # TODO: Implement proper boundary condition handling
-    # This is a placeholder implementation
+    if bc[0] == "dirichlet":
+        D[0, 0] = 2
+    elif bc[0] == "neumann":
+        D[0, 0] = 0
+    # Set the second side
+    if bc[1] == "dirichlet":
+        D[-1, -1] = -2
+    elif bc[1] == "neumann":
+        D[-1, -1] = 0
 
+    return
+
+
+def _ddxCellGradBC(n, bc, device=None, dtype=None):
+    """Create 1D derivative operator from cell-centers to nodes.
+
+    This means we go from n to n+1.
+
+    For Cell-Centered **Dirichlet**, use a ghost point::
+
+        (u_1 - u_g)/hf = grad
+
+         u_g       u_1      u_2
+          *    |    *   |    *     ...
+               ^
+              u_b
+
+    We know the value at the boundary (u_b)::
+
+        (u_g+u_1)/2 = u_b               (the average)
+        u_g = 2*u_b - u_1
+
+        So plug in to gradient:
+
+        (u_1 - (2*u_b - u_1))/hf = grad
+        2*(u_1-u_b)/hf = grad
+
+    Separate, because BC are known (and can move to RHS later)::
+
+        ( 2/hf )*u_1 + ( -2/hf )*u_b = grad
+
+                       (   ^   ) JUST RETURN THIS
+    """
+
+    bc = _validate_BC(bc)
+    device = device or torch.device("cpu")
+    dtype = dtype or torch.float64
+
+    D = torch.zeros((n + 1, 2), dtype=dtype, device=device).to_sparse()
+    if bc[0] == "dirichlet":
+        D[0, 0] = -2
+    elif bc[0] == "neumann":
+        D[0, 0] = 0
+    # Set the second side
+    if bc[1] == "dirichlet":
+        D[-1, 1] = 2
+    elif bc[1] == "neumann":
+        D[-1, 1] = 0
+
+    D.coalesce()
     return D
 
 
@@ -123,22 +191,64 @@ class DiffOperators(BaseMesh):
     @property
     def _face_x_divergence_stencil(self):
         """Stencil for face divergence operator in the x-direction (x-faces to cell centers)."""
-        raise NotImplementedError("_face_x_divergence_stencil not yet implemented")
+        if self.dim == 1:
+            Dx = ddx(self.shape_cells[0])
+        elif self.dim == 2:
+            Dx = kron(speye(self.shape_cells[1]), ddx(self.shape_cells[0]))
+        elif self.dim == 3:
+            Dx = kron3(
+                speye(self.shape_cells[2]),
+                speye(self.shape_cells[1]),
+                ddx(self.shape_cells[0]),
+            )
+        return Dx
 
     @property
     def _face_y_divergence_stencil(self):
         """Stencil for face divergence operator in the y-direction (y-faces to cell centers)."""
-        raise NotImplementedError("_face_y_divergence_stencil not yet implemented")
+        if self.dim == 1:
+            return None
+        elif self.dim == 2:
+            Dy = kron(ddx(self.shape_cells[1]), speye(self.shape_cells[0]))
+        elif self.dim == 3:
+            Dy = kron3(
+                speye(self.shape_cells[2]),
+                ddx(self.shape_cells[1]),
+                speye(self.shape_cells[0]),
+            )
+        return Dy
 
     @property
     def _face_z_divergence_stencil(self):
         """Stencil for face divergence operator in the z-direction (z-faces to cell centers)."""
-        raise NotImplementedError("_face_z_divergence_stencil not yet implemented")
+        if self.dim == 1 or self.dim == 2:
+            return None
+        elif self.dim == 3:
+            Dz = kron3(
+                ddx(self.shape_cells[2]),
+                speye(self.shape_cells[1]),
+                speye(self.shape_cells[0]),
+            )
+        return Dz
 
     @property
     def _face_divergence_stencil(self):
         """Stencil for face divergence operator (all faces to cell centers)."""
-        raise NotImplementedError("_face_divergence_stencil not yet implemented")
+        if self.dim == 1:
+            D = self._face_x_divergence_stencil
+        elif self.dim == 2:
+            D = torch.hstack(
+                (self._face_x_divergence_stencil, self._face_y_divergence_stencil)
+            )
+        elif self.dim == 3:
+            D = torch.hstack(
+                (
+                    self._face_x_divergence_stencil,
+                    self._face_y_divergence_stencil,
+                    self._face_z_divergence_stencil,
+                )
+            )
+        return D
 
     @property
     def face_divergence(self):
@@ -149,7 +259,14 @@ class DiffOperators(BaseMesh):
         torch.sparse.Tensor
             The divergence operator matrix that maps from faces to cell centers
         """
-        raise NotImplementedError("face_divergence not yet implemented")
+        if getattr(self, "_face_divergence", None) is None:
+            # Get the stencil of +1, -1's
+            D = self._face_divergence_stencil
+            # Compute areas of cell faces & volumes
+            S = self.face_areas
+            V = self.cell_volumes
+            self._face_divergence = sdiag(1 / V) * D * sdiag(S)
+        return self._face_divergence
 
     @property
     def face_x_divergence(self):
@@ -165,7 +282,9 @@ class DiffOperators(BaseMesh):
         torch.sparse.Tensor
             The numerical x-derivative operator from x-faces to cell centers
         """
-        raise NotImplementedError("face_x_divergence not yet implemented")
+        S = self.reshape(self.face_areas, "F", "Fx", "V")
+        V = self.cell_volumes
+        return sdiag(1 / V) * self._face_x_divergence_stencil * sdiag(S)
 
     @property
     def face_y_divergence(self):
@@ -181,7 +300,12 @@ class DiffOperators(BaseMesh):
         torch.sparse.Tensor
             The numerical y-derivative operator from y-faces to cell centers
         """
-        raise NotImplementedError("face_y_divergence not yet implemented")
+        if self.dim < 2:
+            return None
+        S = self.reshape(self.face_areas, "F", "Fy", "V")
+        # Compute areas of cell faces & volumes
+        V = self.cell_volumes
+        return sdiag(1 / V) * self._face_y_divergence_stencil * sdiag(S)
 
     @property
     def face_z_divergence(self):
@@ -197,7 +321,12 @@ class DiffOperators(BaseMesh):
         torch.sparse.Tensor
             The numerical z-derivative operator from z-faces to cell centers
         """
-        raise NotImplementedError("face_z_divergence not yet implemented")
+        if self.dim < 3:
+            return None
+        # Compute areas of cell faces & volumes
+        S = self.reshape(self.face_areas, "F", "Fz", "V")
+        V = self.cell_volumes
+        return sdiag(1 / V) * self._face_z_divergence_stencil * sdiag(S)
 
     ###########################################################################
     #                                                                         #
@@ -208,22 +337,64 @@ class DiffOperators(BaseMesh):
     @property
     def _nodal_gradient_x_stencil(self):
         """Stencil for nodal gradient operator in the x-direction."""
-        raise NotImplementedError("_nodal_gradient_x_stencil not yet implemented")
+        if self.dim == 1:
+            Gx = ddx(self.shape_cells[0])
+        elif self.dim == 2:
+            Gx = kron(speye(self.shape_nodes[1]), ddx(self.shape_cells[0]))
+        elif self.dim == 3:
+            Gx = kron3(
+                speye(self.shape_nodes[2]),
+                speye(self.shape_nodes[1]),
+                ddx(self.shape_cells[0]),
+            )
+        return Gx
 
     @property
     def _nodal_gradient_y_stencil(self):
         """Stencil for nodal gradient operator in the y-direction."""
-        raise NotImplementedError("_nodal_gradient_y_stencil not yet implemented")
+        if self.dim == 1:
+            return None
+        elif self.dim == 2:
+            Gy = kron(ddx(self.shape_cells[1]), speye(self.shape_nodes[0]))
+        elif self.dim == 3:
+            Gy = kron3(
+                speye(self.shape_nodes[2]),
+                ddx(self.shape_cells[1]),
+                speye(self.shape_nodes[0]),
+            )
+        return Gy
 
     @property
     def _nodal_gradient_z_stencil(self):
         """Stencil for nodal gradient operator in the z-direction."""
-        raise NotImplementedError("_nodal_gradient_z_stencil not yet implemented")
+        if self.dim == 1 or self.dim == 2:
+            return None
+        else:
+            Gz = kron3(
+                ddx(self.shape_cells[2]),
+                speye(self.shape_nodes[1]),
+                speye(self.shape_nodes[0]),
+            )
+        return Gz
 
     @property
     def _nodal_gradient_stencil(self):
         """Stencil for nodal gradient operator."""
-        raise NotImplementedError("_nodal_gradient_stencil not yet implemented")
+        if self.dim == 1:
+            G = self._nodal_gradient_x_stencil
+        elif self.dim == 2:
+            G = torch.vstack(
+                (self._nodal_gradient_x_stencil, self._nodal_gradient_y_stencil),
+            )
+        elif self.dim == 3:
+            G = torch.vstack(
+                (
+                    self._nodal_gradient_x_stencil,
+                    self._nodal_gradient_y_stencil,
+                    self._nodal_gradient_z_stencil,
+                ),
+            )
+        return G
 
     @property
     def nodal_gradient(self):
@@ -234,7 +405,11 @@ class DiffOperators(BaseMesh):
         torch.sparse.Tensor
             The gradient operator matrix that maps from nodes to edges
         """
-        raise NotImplementedError("nodal_gradient not yet implemented")
+        if getattr(self, "_nodal_gradient", None) is None:
+            G = self._nodal_gradient_stencil
+            L = self.edge_lengths
+            self._nodal_gradient = sdiag(1 / L) * G
+        return self._nodal_gradient
 
     ###########################################################################
     #                                                                         #
@@ -245,32 +420,70 @@ class DiffOperators(BaseMesh):
     @property
     def _nodal_laplacian_x_stencil(self):
         """Stencil for nodal laplacian operator in the x-direction."""
-        raise NotImplementedError("_nodal_laplacian_x_stencil not yet implemented")
+        Dx = ddx(self.shape_cells[0])
+        Lx = -Dx.T * Dx
+
+        if self.dim == 2:
+            Lx = kron(speye(self.shape_nodes[1]), Lx)
+        elif self.dim == 3:
+            Lx = kron3(speye(self.shape_nodes[2]), speye(self.shape_nodes[1]), Lx)
+        return Lx
 
     @property
     def _nodal_laplacian_y_stencil(self):
         """Stencil for nodal laplacian operator in the y-direction."""
-        raise NotImplementedError("_nodal_laplacian_y_stencil not yet implemented")
+        if self.dim == 1:
+            return None
+
+        Dy = ddx(self.shape_cells[1])
+        Ly = -Dy.T * Dy
+
+        if self.dim == 2:
+            Ly = kron(Ly, speye(self.shape_nodes[0]))
+        elif self.dim == 3:
+            Ly = kron3(speye(self.shape_nodes[2]), Ly, speye(self.shape_nodes[0]))
+        return Ly
 
     @property
     def _nodal_laplacian_z_stencil(self):
         """Stencil for nodal laplacian operator in the z-direction."""
-        raise NotImplementedError("_nodal_laplacian_z_stencil not yet implemented")
+        if self.dim == 1 or self.dim == 2:
+            return None
+
+        Dz = ddx(self.shape_cells[2])
+        Lz = -Dz.T * Dz
+        return kron3(Lz, speye(self.shape_nodes[1]), speye(self.shape_nodes[0]))
 
     @property
     def _nodal_laplacian_x(self):
         """Nodal laplacian operator in the x-direction."""
-        raise NotImplementedError("_nodal_laplacian_x not yet implemented")
+        Hx = sdiag(1.0 / self.h[0])
+        if self.dim == 2:
+            Hx = kron(speye(self.shape_nodes[1]), Hx)
+        elif self.dim == 3:
+            Hx = kron3(speye(self.shape_nodes[2]), speye(self.shape_nodes[1]), Hx)
+        return Hx.T * self._nodal_gradient_x_stencil * Hx
 
     @property
     def _nodal_laplacian_y(self):
         """Nodal laplacian operator in the y-direction."""
-        raise NotImplementedError("_nodal_laplacian_y not yet implemented")
+        Hy = sdiag(1.0 / self.h[1])
+        if self.dim == 1:
+            return None
+        elif self.dim == 2:
+            Hy = kron(Hy, speye(self.shape_nodes[0]))
+        elif self.dim == 3:
+            Hy = kron3(speye(self.shape_nodes[2]), Hy, speye(self.shape_nodes[0]))
+        return Hy.T * self._nodal_gradient_y_stencil * Hy
 
     @property
     def _nodal_laplacian_z(self):
         """Nodal laplacian operator in the z-direction."""
-        raise NotImplementedError("_nodal_laplacian_z not yet implemented")
+        if self.dim == 1 or self.dim == 2:
+            return None
+        Hz = sdiag(1.0 / self.h[2])
+        Hz = kron3(Hz, speye(self.shape_nodes[1]), speye(self.shape_nodes[0]))
+        return Hz.T * self._nodal_laplacian_z_stencil * Hz
 
     @property
     def nodal_laplacian(self):
@@ -281,7 +494,21 @@ class DiffOperators(BaseMesh):
         torch.sparse.Tensor
             The laplacian operator matrix that maps from nodes to nodes
         """
-        raise NotImplementedError("nodal_laplacian not yet implemented")
+        if getattr(self, "_nodal_laplacian", None) is None:
+            # Compute divergence operator on faces
+            if self.dim == 1:
+                self._nodal_laplacian = self._nodal_laplacian_x
+            elif self.dim == 2:
+                self._nodal_laplacian = (
+                    self._nodal_laplacian_x + self._nodal_laplacian_y
+                )
+            elif self.dim == 3:
+                self._nodal_laplacian = (
+                    self._nodal_laplacian_x
+                    + self._nodal_laplacian_y
+                    + self._nodal_laplacian_z
+                )
+        return self._nodal_laplacian
 
     ###########################################################################
     #                                                                         #

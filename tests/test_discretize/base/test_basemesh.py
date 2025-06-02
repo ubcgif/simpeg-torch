@@ -139,3 +139,192 @@ def test_n_edges_z_correctness():
     h3d = [torch.ones(2), torch.ones(3), torch.ones(4)]
     mesh3d = TensorMesh(h3d)
     assert mesh3d.n_edges_z == 3 * 4 * 4
+
+
+# Test fixtures for reshape tests
+@pytest.fixture
+def mesh3d():
+    """Create a 3D mesh for reshape testing."""
+    hx = torch.ones(3)
+    hy = 2 * torch.ones(2)
+    hz = 3 * torch.ones(2)
+    return TensorMesh([hx, hy, hz])
+
+
+@pytest.fixture
+def mesh2d():
+    """Create a 2D mesh for reshape testing."""
+    hx = torch.ones(3)
+    hy = 2 * torch.ones(2)
+    return TensorMesh([hx, hy])
+
+
+class TestReshape3D:
+    """Test reshape method for 3D meshes."""
+
+    def test_mesh_r_E_V(self, mesh3d):
+        """Test reshape of edge vectors to components in vector format."""
+        ex = torch.ones(mesh3d.n_edges_x)
+        ey = torch.ones(mesh3d.n_edges_y) * 2
+        ez = torch.ones(mesh3d.n_edges_z) * 3
+        e = torch.cat([ex, ey, ez])
+
+        tex = mesh3d.reshape(e, "E", "Ex", "V")
+        tey = mesh3d.reshape(e, "E", "Ey", "V")
+        tez = mesh3d.reshape(e, "E", "Ez", "V")
+
+        assert torch.all(tex == ex)
+        assert torch.all(tey == ey)
+        assert torch.all(tez == ez)
+
+        # Test returning all components at once
+        tex, tey, tez = mesh3d.reshape(e, "E", "E", "V")
+        assert torch.all(tex == ex)
+        assert torch.all(tey == ey)
+        assert torch.all(tez == ez)
+
+    def test_mesh_r_F_V(self, mesh3d):
+        """Test reshape of face vectors to components in vector format."""
+        fx = torch.ones(mesh3d.n_faces_x)
+        fy = torch.ones(mesh3d.n_faces_y) * 2
+        fz = torch.ones(mesh3d.n_faces_z) * 3
+        f = torch.cat([fx, fy, fz])
+
+        tfx = mesh3d.reshape(f, "F", "Fx", "V")
+        tfy = mesh3d.reshape(f, "F", "Fy", "V")
+        tfz = mesh3d.reshape(f, "F", "Fz", "V")
+
+        assert torch.all(tfx == fx)
+        assert torch.all(tfy == fy)
+        assert torch.all(tfz == fz)
+
+        # Test returning all components at once
+        tfx, tfy, tfz = mesh3d.reshape(f, "F", "F", "V")
+        assert torch.all(tfx == fx)
+        assert torch.all(tfy == fy)
+        assert torch.all(tfz == fz)
+
+    def test_mesh_r_E_M(self, mesh3d):
+        """Test reshape of edge vectors to matrix format."""
+        g = torch.ones((torch.prod(torch.tensor(mesh3d.shape_edges_x)).item(), 3))
+        g[:, 1] = 2
+        g[:, 2] = 3
+
+        Xex, Yex, Zex = mesh3d.reshape(g, "Ex", "Ex", "M")
+
+        assert Xex.shape == mesh3d.shape_edges_x
+        assert Yex.shape == mesh3d.shape_edges_x
+        assert Zex.shape == mesh3d.shape_edges_x
+        assert torch.all(Xex == 1)
+        assert torch.all(Yex == 2)
+        assert torch.all(Zex == 3)
+
+    def test_mesh_r_F_M(self, mesh3d):
+        """Test reshape of face vectors to matrix format."""
+        g = torch.ones((torch.prod(torch.tensor(mesh3d.shape_faces_x)).item(), 3))
+        g[:, 1] = 2
+        g[:, 2] = 3
+
+        Xfx, Yfx, Zfx = mesh3d.reshape(g, "Fx", "Fx", "M")
+
+        assert Xfx.shape == mesh3d.shape_faces_x
+        assert Yfx.shape == mesh3d.shape_faces_x
+        assert Zfx.shape == mesh3d.shape_faces_x
+        assert torch.all(Xfx == 1)
+        assert torch.all(Yfx == 2)
+        assert torch.all(Zfx == 3)
+
+    def test_mesh_r_CC_M(self, mesh3d):
+        """Test reshape of cell center vectors to matrix format."""
+        g = torch.ones((mesh3d.n_cells, 3))
+        g[:, 1] = 2
+        g[:, 2] = 3
+
+        Xc, Yc, Zc = mesh3d.reshape(g, "CC", "CC", "M")
+
+        assert Xc.shape == mesh3d.shape_cells
+        assert Yc.shape == mesh3d.shape_cells
+        assert Zc.shape == mesh3d.shape_cells
+        assert torch.all(Xc == 1)
+        assert torch.all(Yc == 2)
+        assert torch.all(Zc == 3)
+
+
+class TestReshape2D:
+    """Test reshape method for 2D meshes."""
+
+    def test_mesh_r_E_V(self, mesh2d):
+        """Test reshape of edge vectors to components in vector format for 2D."""
+        ex = torch.ones(mesh2d.n_edges_x)
+        ey = torch.ones(mesh2d.n_edges_y) * 2
+        e = torch.cat([ex, ey])
+
+        tex = mesh2d.reshape(e, "E", "Ex", "V")
+        tey = mesh2d.reshape(e, "E", "Ey", "V")
+
+        assert torch.all(tex == ex)
+        assert torch.all(tey == ey)
+
+        tex, tey = mesh2d.reshape(e, "E", "E", "V")
+        assert torch.all(tex == ex)
+        assert torch.all(tey == ey)
+
+        # Test that asking for z-component raises error in 2D
+        with pytest.raises(ValueError):
+            mesh2d.reshape(e, "E", "Ez", "V")
+
+    def test_mesh_r_F_V(self, mesh2d):
+        """Test reshape of face vectors to components in vector format for 2D."""
+        fx = torch.ones(mesh2d.n_faces_x)
+        fy = torch.ones(mesh2d.n_faces_y) * 2
+        f = torch.cat([fx, fy])
+
+        tfx = mesh2d.reshape(f, "F", "Fx", "V")
+        tfy = mesh2d.reshape(f, "F", "Fy", "V")
+
+        assert torch.all(tfx == fx)
+        assert torch.all(tfy == fy)
+
+        tfx, tfy = mesh2d.reshape(f, "F", "F", "V")
+        assert torch.all(tfx == fx)
+        assert torch.all(tfy == fy)
+
+        # Test that asking for z-component raises error in 2D
+        with pytest.raises(ValueError):
+            mesh2d.reshape(f, "F", "Fz", "V")
+
+    def test_mesh_r_E_M(self, mesh2d):
+        """Test reshape of edge vectors to matrix format for 2D."""
+        g = torch.ones((torch.prod(torch.tensor(mesh2d.shape_edges_x)).item(), 2))
+        g[:, 1] = 2
+
+        Xex, Yex = mesh2d.reshape(g, "Ex", "Ex", "M")
+
+        assert Xex.shape == mesh2d.shape_edges_x
+        assert Yex.shape == mesh2d.shape_edges_x
+        assert torch.all(Xex == 1)
+        assert torch.all(Yex == 2)
+
+    def test_mesh_r_F_M(self, mesh2d):
+        """Test reshape of face vectors to matrix format for 2D."""
+        g = torch.ones((torch.prod(torch.tensor(mesh2d.shape_faces_x)).item(), 2))
+        g[:, 1] = 2
+
+        Xfx, Yfx = mesh2d.reshape(g, "Fx", "Fx", "M")
+
+        assert Xfx.shape == mesh2d.shape_faces_x
+        assert Yfx.shape == mesh2d.shape_faces_x
+        assert torch.all(Xfx == 1)
+        assert torch.all(Yfx == 2)
+
+    def test_mesh_r_CC_M(self, mesh2d):
+        """Test reshape of cell center vectors to matrix format for 2D."""
+        g = torch.ones((mesh2d.n_cells, 2))
+        g[:, 1] = 2
+
+        Xc, Yc = mesh2d.reshape(g, "CC", "CC", "M")
+
+        assert Xc.shape == mesh2d.shape_cells
+        assert Yc.shape == mesh2d.shape_cells
+        assert torch.all(Xc == 1)
+        assert torch.all(Yc == 2)

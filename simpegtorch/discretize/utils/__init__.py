@@ -113,6 +113,7 @@ from .matrix_utils import (
     sdiag,
     sdinv,
     speye,
+    spzeros,
     kron,
     reshape_fortran,
     kron3,
