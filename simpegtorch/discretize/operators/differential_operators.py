@@ -1274,36 +1274,213 @@ class DiffOperators(BaseMesh):
     ###########################################################################
 
     def get_BC_projections(self, BC, discretization="CC"):
-        """Get boundary condition projection matrices.
+        """Create the weak form boundary condition projection matrices.
 
-        Parameters
-        ----------
-        BC : dict
-            Boundary condition specification
-        discretization : str, optional
-            Discretization type, by default "CC"
+        Examples
+        --------
+        .. code:: python
 
-        Returns
-        -------
-        tuple
-            Boundary condition projection matrices
+            # Neumann in all directions
+            BC = 'neumann'
+
+            # 3D, Dirichlet in y Neumann else
+            BC = ['neumann', 'dirichlet', 'neumann']
+
+            # 3D, Neumann in x on bottom of domain, Dirichlet else
+            BC = [['neumann', 'dirichlet'], 'dirichlet', 'dirichlet']
         """
-        raise NotImplementedError("get_BC_projections not yet implemented")
+        if discretization != "CC":
+            raise NotImplementedError(
+                "Boundary conditions only implemented for CC discretization."
+            )
+
+        if isinstance(BC, str):
+            BC = [BC for _ in self.vnC]  # Repeat the str self.dim times
+        elif isinstance(BC, list):
+            if len(BC) != self.dim:
+                raise ValueError("BC list must be the size of your mesh")
+        else:
+            raise TypeError("BC must be a str or a list.")
+
+        for i, bc_i in enumerate(BC):
+            BC[i] = _validate_BC(bc_i)
+
+        # Get device and dtype from self attributes
+        device = self.face_areas.device
+        dtype = self.face_areas.dtype
+
+        def projDirichlet(n, bc):
+            bc = _validate_BC(bc)
+            # Create sparse COO matrix
+            indices = torch.tensor([[0, n], [0, 1]], dtype=torch.long, device=device)
+            vals = torch.zeros(2, dtype=dtype, device=device)
+            if bc[0] == "dirichlet":
+                vals[0] = -1.0
+            if bc[1] == "dirichlet":
+                vals[1] = 1.0
+            return torch.sparse_coo_tensor(
+                indices, vals, size=(n + 1, 2), dtype=dtype, device=device
+            ).coalesce()
+
+        def projNeumannIn(n, bc):
+            bc = _validate_BC(bc)
+            P = speye(n + 1)  # Identity matrix in COO format
+            if bc[0] == "neumann":
+                # Remove first row: P[1:, :]
+                mask = torch.arange(P.size(0), device=device) >= 1
+                row_indices = P.indices()[0]
+                valid_mask = mask[row_indices]
+                new_indices = P.indices()[:, valid_mask]
+                new_indices[0] -= 1  # Adjust row indices
+                new_values = P.values()[valid_mask]
+                P = torch.sparse_coo_tensor(
+                    new_indices,
+                    new_values,
+                    size=(n, P.size(1)),
+                    dtype=dtype,
+                    device=device,
+                ).coalesce()
+            if bc[1] == "neumann":
+                # Remove last row: P[:-1, :]
+                mask = torch.arange(P.size(0), device=device) < P.size(0) - 1
+                row_indices = P.indices()[0]
+                valid_mask = mask[row_indices]
+                new_indices = P.indices()[:, valid_mask]
+                new_values = P.values()[valid_mask]
+                P = torch.sparse_coo_tensor(
+                    new_indices,
+                    new_values,
+                    size=(P.size(0) - 1, P.size(1)),
+                    dtype=dtype,
+                    device=device,
+                ).coalesce()
+            return P
+
+        def projNeumannOut(n, bc):
+            bc = _validate_BC(bc)
+            indices = torch.tensor([[0, 1], [0, n]], dtype=torch.long, device=device)
+            vals = torch.zeros(2, dtype=dtype, device=device)
+            if bc[0] == "neumann":
+                vals[0] = 1.0
+            if bc[1] == "neumann":
+                vals[1] = 1.0
+            return torch.sparse_coo_tensor(
+                indices, vals, size=(2, n + 1), dtype=dtype, device=device
+            ).coalesce()
+
+        n = self.vnC
+        indF = self.face_boundary_indices
+
+        if self.dim == 1:
+            Pbc = projDirichlet(n[0], BC[0])
+            indF = indF[0] | indF[1]
+            Pbc = torch.sparse.mm(Pbc, sdiag(self.face_areas[indF]))
+
+            Pin = projNeumannIn(n[0], BC[0])
+            Pout = projNeumannOut(n[0], BC[0])
+
+        elif self.dim == 2:
+            Pbc1 = kron(speye(n[1]), projDirichlet(n[0], BC[0]))
+            Pbc2 = kron(projDirichlet(n[1], BC[1]), speye(n[0]))
+            Pbc = torch_blockdiag([Pbc1, Pbc2])
+            indF = torch.cat([indF[0] | indF[1], indF[2] | indF[3]])
+            Pbc = torch.sparse.mm(Pbc, sdiag(self.face_areas[indF]))
+
+            P1 = kron(speye(n[1]), projNeumannIn(n[0], BC[0]))
+            P2 = kron(projNeumannIn(n[1], BC[1]), speye(n[0]))
+            Pin = torch_blockdiag([P1, P2])
+
+            P1 = kron(speye(n[1]), projNeumannOut(n[0], BC[0]))
+            P2 = kron(projNeumannOut(n[1], BC[1]), speye(n[0]))
+            Pout = torch_blockdiag([P1, P2])
+
+        elif self.dim == 3:
+            Pbc1 = kron3(speye(n[2]), speye(n[1]), projDirichlet(n[0], BC[0]))
+            Pbc2 = kron3(speye(n[2]), projDirichlet(n[1], BC[1]), speye(n[0]))
+            Pbc3 = kron3(projDirichlet(n[2], BC[2]), speye(n[1]), speye(n[0]))
+            Pbc = torch_blockdiag([Pbc1, Pbc2, Pbc3])
+            indF = torch.cat([indF[0] | indF[1], indF[2] | indF[3], indF[4] | indF[5]])
+            Pbc = torch.sparse.mm(Pbc, sdiag(self.face_areas[indF]))
+
+            P1 = kron3(speye(n[2]), speye(n[1]), projNeumannIn(n[0], BC[0]))
+            P2 = kron3(speye(n[2]), projNeumannIn(n[1], BC[1]), speye(n[0]))
+            P3 = kron3(projNeumannIn(n[2], BC[2]), speye(n[1]), speye(n[0]))
+            Pin = torch_blockdiag([P1, P2, P3])
+
+            P1 = kron3(speye(n[2]), speye(n[1]), projNeumannOut(n[0], BC[0]))
+            P2 = kron3(speye(n[2]), projNeumannOut(n[1], BC[1]), speye(n[0]))
+            P3 = kron3(projNeumannOut(n[2], BC[2]), speye(n[1]), speye(n[0]))
+            Pout = torch_blockdiag([P1, P2, P3])
+
+        return Pbc, Pin, Pout
 
     def get_BC_projections_simple(self, discretization="CC"):
-        """Get simplified boundary condition projection matrices.
+        """Create weak form boundary condition projection matrices for mixed boundary condition."""
+        if discretization != "CC":
+            raise NotImplementedError(
+                "Boundary conditions only implemented for CC discretization."
+            )
 
-        Parameters
-        ----------
-        discretization : str, optional
-            Discretization type, by default "CC"
+        # Get device and dtype from self attributes
+        device = self.face_areas.device
+        dtype = self.face_areas.dtype
 
-        Returns
-        -------
-        tuple
-            Simplified boundary condition projection matrices
-        """
-        raise NotImplementedError("get_BC_projections_simple not yet implemented")
+        def projBC(n):
+            indices = torch.tensor([[0, n], [0, 1]], dtype=torch.long, device=device)
+            vals = torch.ones(2, dtype=dtype, device=device)
+            return torch.sparse_coo_tensor(
+                indices, vals, size=(n + 1, 2), dtype=dtype, device=device
+            ).coalesce()
+
+        def projDirichlet(n, bc):
+            bc = _validate_BC(bc)
+            indices = torch.tensor([[0, n], [0, 1]], dtype=torch.long, device=device)
+            vals = torch.zeros(2, dtype=dtype, device=device)
+            if bc[0] == "dirichlet":
+                vals[0] = -1.0
+            if bc[1] == "dirichlet":
+                vals[1] = 1.0
+            return torch.sparse_coo_tensor(
+                indices, vals, size=(n + 1, 2), dtype=dtype, device=device
+            ).coalesce()
+
+        BC = [
+            ["dirichlet", "dirichlet"],
+            ["dirichlet", "dirichlet"],
+            ["dirichlet", "dirichlet"],
+        ]
+        n = self.vnC
+        indF = self.face_boundary_indices
+
+        if self.dim == 1:
+            Pbc = projDirichlet(n[0], BC[0])
+            B = projBC(n[0])
+            indF = indF[0] | indF[1]
+            Pbc = torch.sparse.mm(Pbc, sdiag(self.face_areas[indF]))
+
+        elif self.dim == 2:
+            Pbc1 = kron(speye(n[1]), projDirichlet(n[0], BC[0]))
+            Pbc2 = kron(projDirichlet(n[1], BC[1]), speye(n[0]))
+            Pbc = torch_blockdiag([Pbc1, Pbc2])
+            B1 = kron(speye(n[1]), projBC(n[0]))
+            B2 = kron(projBC(n[1]), speye(n[0]))
+            B = torch_blockdiag([B1, B2])
+            indF = torch.cat([indF[0] | indF[1], indF[2] | indF[3]])
+            Pbc = torch.sparse.mm(Pbc, sdiag(self.face_areas[indF]))
+
+        elif self.dim == 3:
+            Pbc1 = kron3(speye(n[2]), speye(n[1]), projDirichlet(n[0], BC[0]))
+            Pbc2 = kron3(speye(n[2]), projDirichlet(n[1], BC[1]), speye(n[0]))
+            Pbc3 = kron3(projDirichlet(n[2], BC[2]), speye(n[1]), speye(n[0]))
+            Pbc = torch_blockdiag([Pbc1, Pbc2, Pbc3])
+            B1 = kron3(speye(n[2]), speye(n[1]), projBC(n[0]))
+            B2 = kron3(speye(n[2]), projBC(n[1]), speye(n[0]))
+            B3 = kron3(projBC(n[2]), speye(n[1]), speye(n[0]))
+            B = torch_blockdiag([B1, B2, B3])
+            indF = torch.cat([indF[0] | indF[1], indF[2] | indF[3], indF[4] | indF[5]])
+            Pbc = torch.sparse.mm(Pbc, sdiag(self.face_areas[indF]))
+
+        return Pbc, B.t()  # .t() is transpose for PyTorch tensors
 
     ###########################################################################
     #                                                                         #
