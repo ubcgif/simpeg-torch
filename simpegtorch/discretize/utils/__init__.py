@@ -133,6 +133,8 @@ from .matrix_utils import (
     inverse_property_tensor,
     Zero,
     Identity,
+    torch_blockdiag,
+    cross2d,
 )
 from .mesh_utils import (
     unpack_widths,

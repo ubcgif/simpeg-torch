@@ -301,7 +301,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         dim = self.dim
         if dim == 1:
             return self.nodes_x[[0, -1]]
-        return self.nodes[make_boundary_bool(self.shape_nodes, device=self.device)]
+        return self.nodes[make_boundary_bool(self.shape_nodes)]
 
     @property
     def h_gridded(self):

@@ -27,6 +27,7 @@ from simpegtorch.discretize.utils import (
     TensorType,
     Zero,
     Identity,
+    torch_blockdiag,
     # extract_core_mesh,
     # active_from_xyz,
     # mesh_builder_xyz,
@@ -734,3 +735,141 @@ def test_sdinv_error_cases():
 
     with pytest.raises(ZeroDivisionError):
         sdinv(S)
+
+
+def test_torch_blockdiag_basic():
+    """Test basic functionality of torch_blockdiag."""
+    # Create simple diagonal matrices
+    A = sdiag(torch.tensor([1.0, 2.0]))
+    B = sdiag(torch.tensor([3.0, 4.0, 5.0]))
+
+    result = torch_blockdiag([A, B])
+
+    # Check shape
+    assert result.shape == (5, 5), "Block diagonal shape should be (5, 5)"
+
+    # Check structure by converting to dense
+    result_dense = result.to_dense()
+    expected = torch.tensor(
+        [
+            [1.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 3.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 4.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 5.0],
+        ]
+    )
+
+    assert torch.allclose(result_dense, expected), "Block diagonal structure incorrect"
+
+
+def test_torch_blockdiag_single_matrix():
+    """Test torch_blockdiag with a single matrix."""
+    A = sdiag(torch.tensor([1.0, 2.0, 3.0]))
+    result = torch_blockdiag([A])
+
+    # Should be identical to input matrix
+    assert torch.allclose(result.to_dense(), A.to_dense()), "Single matrix case failed"
+
+
+def test_torch_blockdiag_empty_input():
+    """Test torch_blockdiag with empty input."""
+    with pytest.raises(ValueError):
+        torch_blockdiag([])
+
+
+def test_torch_blockdiag_tuple_input():
+    """Test torch_blockdiag with tuple input."""
+    A = sdiag(torch.tensor([1.0, 2.0]))
+    B = sdiag(torch.tensor([3.0, 4.0]))
+
+    result = torch_blockdiag((A, B))
+    expected = torch_blockdiag([A, B])
+
+    assert torch.allclose(result.to_dense(), expected.to_dense()), "Tuple input failed"
+
+
+def test_torch_blockdiag_csr_format():
+    """Test torch_blockdiag with CSR output format."""
+    A = sdiag(torch.tensor([1.0, 2.0]), sparse_type="csr")
+    B = sdiag(torch.tensor([3.0, 4.0]), sparse_type="csr")
+
+    result = torch_blockdiag([A, B], sparse_type="csr")
+
+    assert result.is_sparse_csr, "Result should be in CSR format"
+    assert result.shape == (4, 4), "CSR result shape incorrect"
+
+
+def test_torch_blockdiag_mixed_sizes():
+    """Test torch_blockdiag with matrices of different sizes."""
+    # Create matrices with different shapes
+    A = sdiag(torch.tensor([1.0]))  # 1x1
+    B = torch.sparse_coo_tensor(
+        torch.tensor([[0, 0, 1], [0, 1, 1]]), torch.tensor([2.0, 3.0, 4.0]), (2, 2)
+    )  # 2x2
+    C = sdiag(torch.tensor([5.0, 6.0, 7.0]))  # 3x3
+
+    result = torch_blockdiag([A, B, C])
+
+    assert result.shape == (6, 6), "Mixed sizes shape incorrect"
+
+    # Check specific values
+    result_dense = result.to_dense()
+    assert result_dense[0, 0] == 1.0, "A block incorrect"
+    assert result_dense[1, 1] == 2.0, "B block position (0,0) incorrect"
+    assert result_dense[1, 2] == 3.0, "B block position (0,1) incorrect"
+    assert result_dense[2, 2] == 4.0, "B block position (1,1) incorrect"
+    assert result_dense[3, 3] == 5.0, "C block position (0,0) incorrect"
+    assert result_dense[4, 4] == 6.0, "C block position (1,1) incorrect"
+    assert result_dense[5, 5] == 7.0, "C block position (2,2) incorrect"
+
+
+def test_torch_blockdiag_empty_matrices():
+    """Test torch_blockdiag with matrices that have no non-zero elements."""
+    device = torch.device("cpu")
+
+    # Create empty sparse matrices
+    A = torch.sparse_coo_tensor(
+        torch.zeros((2, 0), dtype=torch.long, device=device),
+        torch.zeros(0, dtype=torch.float64, device=device),
+        (2, 2),
+        device=device,
+    )
+    B = sdiag(torch.tensor([1.0, 2.0]))
+
+    result = torch_blockdiag([A, B])
+
+    assert result.shape == (4, 4), "Shape with empty matrix incorrect"
+    result_dense = result.to_dense()
+
+    # A block should be all zeros
+    assert torch.all(result_dense[:2, :2] == 0.0), "Empty matrix block should be zero"
+    # B block should have diagonal values
+    assert result_dense[2, 2] == 1.0, "Non-empty block incorrect"
+    assert result_dense[3, 3] == 2.0, "Non-empty block incorrect"
+
+
+def test_torch_blockdiag_error_cases():
+    """Test torch_blockdiag error handling."""
+    # Test with non-sparse matrices
+    A = torch.tensor([[1.0, 0.0], [0.0, 2.0]])  # Dense matrix
+    B = sdiag(torch.tensor([3.0, 4.0]))
+
+    with pytest.raises(TypeError):
+        torch_blockdiag([A, B])
+
+
+@pytest.mark.parametrize(
+    "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+)
+def test_torch_blockdiag_device_support(device):
+    """Test torch_blockdiag on different devices."""
+    device = torch.device(device)
+
+    A = sdiag(torch.tensor([1.0, 2.0], device=device))
+    B = sdiag(torch.tensor([3.0, 4.0, 5.0], device=device))
+
+    result = torch_blockdiag([A, B])
+
+    assert result.device == device, f"Result device should be {device}"
+    assert result.shape == (5, 5), "Device test shape incorrect"

@@ -34,6 +34,12 @@ class BaseMesh:
         "aveN2CC": "average_node_to_cell",
         "aveN2E": "average_node_to_edge",
         "aveN2F": "average_node_to_face",
+        "gridFx": "faces_x",
+        "gridFy": "faces_y",
+        "gridFz": "faces_z",
+        "gridEx": "edges_x",
+        "gridEy": "edges_y",
+        "gridEz": "edges_z",
     }
 
     def __getattr__(self, name):
