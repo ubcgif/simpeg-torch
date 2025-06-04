@@ -1,5 +1,6 @@
 import torch
 from simpegtorch.discretize.tests import OrderTest
+from simpegtorch.discretize.utils import mkvc
 
 
 def u(*args):
@@ -67,21 +68,30 @@ class Test1DBoundaryIntegral(OrderTest):
             u_bf = u(mesh.boundary_faces)
 
             D = mesh.face_divergence
-            M_c = torch.diag(torch.tensor(mesh.cell_volumes, dtype=torch.float64))
+            M_c = torch.diag(mesh.cell_volumes)
             M_bf = mesh.boundary_face_scalar_integral
 
-            discrete_val = -(v_f.T @ D.T) @ M_c @ u_cc + v_f.T @ (M_bf @ u_bf)
+            # reverse the order of tensors
+            v_f = v_f.permute(*torch.arange(v_f.ndim - 1, -1, -1))
+            D = D.permute(*torch.arange(D.ndim - 1, -1, -1))
+
+            discrete_val = -(v_f @ D) @ M_c @ u_cc + v_f @ (M_bf @ u_bf)
             true_val = 6 / 5
+
         if self.myTest == "edge_div":
             u_n = u(mesh.nodes)
             v_e = v(mesh.edges)
-            v_bn = v(mesh.boundary_nodes).reshape(-1)
+            v_bn = mkvc(v(mesh.boundary_nodes))
 
             M_e = mesh.get_edge_inner_product()
             G = mesh.nodal_gradient
             M_bn = mesh.boundary_node_vector_integral
 
-            discrete_val = -(u_n.T @ G.T) @ M_e @ v_e + u_n.T @ (M_bn @ v_bn)
+            # reverse the order of tensors
+            u_n = u_n.permute(*torch.arange(u_n.ndim - 1, -1, -1))
+            G = G.permute(*torch.arange(G.ndim - 1, -1, -1))
+
+            discrete_val = -(u_n @ G) @ M_e @ v_e + u_n @ (M_bn @ v_bn)
             true_val = 4 / 5
         return torch.abs(discrete_val - true_val)
 
@@ -111,22 +121,30 @@ class Test2DBoundaryIntegral(OrderTest):
             u_bf = u(*mesh.boundary_faces.T)
 
             D = mesh.face_divergence
-            M_c = torch.diag(torch.tensor(mesh.cell_volumes, dtype=torch.float64))
+            M_c = torch.diag(mesh.cell_volumes)
             M_bf = mesh.boundary_face_scalar_integral
 
-            discrete_val = -(v_f.T @ D.T) @ M_c @ u_cc + v_f.T @ (M_bf @ u_bf)
+            # reverse the order of tensors
+            v_f = v_f.permute(*torch.arange(v_f.ndim - 1, -1, -1))
+            D = D.permute(*torch.arange(D.ndim - 1, -1, -1))
+
+            discrete_val = -(v_f @ D) @ M_c @ u_cc + v_f @ (M_bf @ u_bf)
             true_val = 12 / 5
 
         elif self.myTest == "edge_div":
             u_n = u(*mesh.nodes.T)
             v_e = mesh.project_edge_vector(v(*mesh.edges.T))
-            v_bn = v(*mesh.boundary_nodes.T).reshape(-1)
+            v_bn = mkvc(v(*mesh.boundary_nodes.T))
 
             M_e = mesh.get_edge_inner_product()
             G = mesh.nodal_gradient
             M_bn = mesh.boundary_node_vector_integral
 
-            discrete_val = -(u_n.T @ G.T) @ M_e @ v_e + u_n.T @ (M_bn @ v_bn)
+            # reverse the order of tensors
+            u_n = u_n.permute(*torch.arange(u_n.ndim - 1, -1, -1))
+            G = G.permute(*torch.arange(G.ndim - 1, -1, -1))
+
+            discrete_val = -(u_n @ G) @ M_e @ v_e + u_n @ (M_bn @ v_bn)
             true_val = 241 / 60
 
         elif self.myTest == "face_curl":
@@ -134,11 +152,14 @@ class Test2DBoundaryIntegral(OrderTest):
             u_c = u(*mesh.cell_centers.T)
             u_be = u(*mesh.boundary_edges.T)
 
-            M_c = torch.diag(torch.tensor(mesh.cell_volumes, dtype=torch.float64))
+            M_c = torch.diag(mesh.cell_volumes)
             Curl = mesh.edge_curl
             M_be = mesh.boundary_edge_vector_integral
 
-            discrete_val = (w_e.T @ Curl.T) @ M_c @ u_c - w_e.T @ (M_be @ u_be)
+            Curl = Curl.permute(*torch.arange(Curl.ndim - 1, -1, -1))
+            w_e = w_e.permute(*torch.arange(w_e.ndim - 1, -1, -1))
+
+            discrete_val = (w_e @ Curl) @ M_c @ u_c - w_e @ (M_be @ u_be)
             true_val = -173 / 30
 
         return torch.abs(discrete_val - true_val)
@@ -174,34 +195,46 @@ class Test3DBoundaryIntegral(OrderTest):
             u_bf = u(*mesh.boundary_faces.T)
 
             D = mesh.face_divergence
-            M_c = torch.diag(torch.tensor(mesh.cell_volumes, dtype=torch.float64))
+            M_c = torch.diag(mesh.cell_volumes)
             M_bf = mesh.boundary_face_scalar_integral
 
-            discrete_val = -(v_f.T @ D.T) @ M_c @ u_cc + v_f.T @ (M_bf @ u_bf)
+            # reverse the order of tensors
+            v_f = v_f.permute(*torch.arange(v_f.ndim - 1, -1, -1))
+            D = D.permute(*torch.arange(D.ndim - 1, -1, -1))
+
+            discrete_val = -(v_f @ D) @ M_c @ u_cc + v_f @ (M_bf @ u_bf)
             true_val = -4 / 15
 
         elif self.myTest == "edge_div":
             u_n = u(*mesh.nodes.T)
             v_e = mesh.project_edge_vector(v(*mesh.edges.T))
-            v_bn = v(*mesh.boundary_nodes.T).reshape(-1)
+            v_bn = mkvc(v(*mesh.boundary_nodes.T))
 
             M_e = mesh.get_edge_inner_product()
             G = mesh.nodal_gradient
             M_bn = mesh.boundary_node_vector_integral
 
-            discrete_val = -(u_n.T @ G.T) @ M_e @ v_e + u_n.T @ (M_bn @ v_bn)
+            # reverse the order of tensors
+            u_n = u_n.permute(*torch.arange(u_n.ndim - 1, -1, -1))
+            G = G.permute(*torch.arange(G.ndim - 1, -1, -1))
+
+            discrete_val = -(u_n @ G) @ M_e @ v_e + u_n @ (M_bn @ v_bn)
             true_val = 27 / 20
 
         elif self.myTest == "face_curl":
             w_f = mesh.project_face_vector(w(*mesh.faces.T))
             v_e = mesh.project_edge_vector(v(*mesh.edges.T))
-            w_be = w(*mesh.boundary_edges.T).reshape(-1)
+            w_be = mkvc(w(*mesh.boundary_edges.T))
 
             M_f = mesh.get_face_inner_product()
             Curl = mesh.edge_curl
             M_be = mesh.boundary_edge_vector_integral
 
-            discrete_val = (v_e.T @ Curl.T) @ M_f @ w_f - v_e.T @ (M_be @ w_be)
+            # reverse the order of tensors
+            Curl = Curl.permute(*torch.arange(Curl.ndim - 1, -1, -1))
+            v_e = v_e.permute(*torch.arange(v_e.ndim - 1, -1, -1))
+
+            discrete_val = (v_e @ Curl) @ M_f @ w_f - v_e @ (M_be @ w_be)
             true_val = -79 / 6
 
         return torch.abs(discrete_val - true_val)

@@ -1144,7 +1144,7 @@ class DiffOperators(BaseMesh):
         if self.dim == 2:
             w_cross_n = cross2d(av_da, w)
         else:
-            w_cross_n = torch.cross(av_da, w)
+            w_cross_n = torch.cross(av_da, w, dim=-1)
 
         if self.dim == 2:
             return Pe.T @ sdiag(w_cross_n)
