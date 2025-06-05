@@ -445,7 +445,7 @@ class BaseTensorMesh(BaseRectangularMesh):
         dim = self.dim
 
         if dim == 1:
-            return torch.tensor([[-1.0], [1.0]], dtype=self.dtype, device=self.device)
+            return torch.tensor([-1.0, 1.0], dtype=self.dtype, device=self.device)
 
         if dim == 2:
             nx = ndgrid(

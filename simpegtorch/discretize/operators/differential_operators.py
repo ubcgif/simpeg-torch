@@ -624,9 +624,17 @@ class DiffOperators(BaseMesh):
         tuple
             Tuple containing the weak form operator and boundary terms
         """
-        alpha = torch.atleast_1d(alpha)
-        beta = torch.atleast_1d(beta)
-        gamma = torch.atleast_1d(gamma)
+        alpha = torch.as_tensor(alpha, dtype=self.dtype, device=self.device)
+        beta = torch.as_tensor(beta, dtype=self.dtype, device=self.device)
+        gamma = torch.as_tensor(gamma, dtype=self.dtype, device=self.device)
+
+        # Ensure all tensors are at least 1-dimensional
+        if alpha.dim() == 0:
+            alpha = alpha.unsqueeze(0)
+        if beta.dim() == 0:
+            beta = beta.unsqueeze(0)
+        if gamma.dim() == 0:
+            gamma = gamma.unsqueeze(0)
 
         if torch.any(beta == 0.0):
             raise ValueError("beta cannot have a zero value")
@@ -639,17 +647,27 @@ class DiffOperators(BaseMesh):
 
         if len(alpha) == 1:
             if len(beta) != 1:
-                alpha = torch.full(len(beta), alpha[0])
+                alpha = torch.full(
+                    (len(beta),), alpha[0], dtype=self.dtype, device=self.device
+                )
             elif len(gamma) != 1:
-                alpha = torch.full(len(gamma), alpha[0])
+                alpha = torch.full(
+                    (len(gamma),), alpha[0], dtype=self.dtype, device=self.device
+                )
             else:
-                alpha = torch.full(n_boundary_faces, alpha[0])
+                alpha = torch.full(
+                    (n_boundary_faces,), alpha[0], dtype=self.dtype, device=self.device
+                )
         if len(beta) == 1:
             if len(alpha) != 1:
-                beta = torch.full(len(alpha), beta[0])
+                beta = torch.full(
+                    (len(alpha),), beta[0], dtype=self.dtype, device=self.device
+                )
         if len(gamma) == 1:
             if len(alpha) != 1:
-                gamma = torch.full(len(alpha), gamma[0])
+                gamma = torch.full(
+                    (len(alpha),), gamma[0], dtype=self.dtype, device=self.device
+                )
 
         if len(alpha) != len(beta) or len(beta) != len(gamma):
             raise ValueError("alpha, beta, and gamma must have the same length")
@@ -854,7 +872,60 @@ class DiffOperators(BaseMesh):
         tuple
             Tuple containing the weak form operator and boundary terms
         """
-        raise NotImplementedError("cell_gradient_weak_form_robin not yet implemented")
+        # Convert inputs to PyTorch tensors
+        alpha = torch.as_tensor(alpha, dtype=self.dtype, device=self.device)
+        beta = torch.as_tensor(beta, dtype=self.dtype, device=self.device)
+        gamma = torch.as_tensor(gamma, dtype=self.dtype, device=self.device)
+
+        # get length between boundary cell_centers and boundary_faces
+        Pf = self.project_face_to_boundary_face
+        aveC2BF = torch.sparse.mm(Pf, self.average_cell_to_face)
+
+        # distance from cell centers to ghost point on boundary faces
+        if self.dim == 1:
+            h = torch.abs(
+                self.boundary_faces
+                - torch.sparse.mm(aveC2BF, self.cell_centers.unsqueeze(-1)).squeeze()
+            )
+        else:
+            # For multi-dimensional case
+            boundary_centers = torch.sparse.mm(aveC2BF, self.cell_centers)
+            h = torch.linalg.norm(self.boundary_faces - boundary_centers, dim=1)
+
+        # for the ghost point u_k = a*u_i + b where
+        a = beta / h / (alpha + beta / h)
+
+        # Create diagonal sparse matrix for 'a' and multiply with aveC2BF
+        n_boundary = a.shape[0]
+
+        # Create diagonal matrix as sparse tensor
+        a_diag_indices = torch.stack(
+            [torch.arange(n_boundary), torch.arange(n_boundary)]
+        )
+        a_diag = torch.sparse_coo_tensor(
+            a_diag_indices, a, (n_boundary, n_boundary)
+        ).coalesce()
+
+        A = torch.sparse.mm(a_diag, aveC2BF)
+
+        # Handle gamma which can be 1D or 2D
+        if gamma.dim() > 1:
+            b = gamma / (alpha + beta / h).unsqueeze(-1)
+        else:
+            b = gamma / (alpha + beta / h)
+
+        # value at boundary = A*cells + b
+        M = self.boundary_face_scalar_integral
+        A = torch.sparse.mm(M, A)
+
+        if b.dim() > 1:
+            # For 2D b, we need to handle matrix multiplication differently
+            b = torch.sparse.mm(M, b)
+        else:
+            # For 1D b, convert to proper shape for sparse matrix multiplication
+            b = torch.sparse.mm(M, b.unsqueeze(-1)).squeeze()
+
+        return A, b
 
     @property
     def cell_gradient_BC(self):

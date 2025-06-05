@@ -31,34 +31,56 @@ def call3(fun, xyz):
     return fun(xyz[:, 0], xyz[:, 1], xyz[:, 2])
 
 
+def cart_row2(g, xfun, yfun):
+    """Create 2D vector row."""
+    return torch.stack([call2(xfun, g), call2(yfun, g)], dim=-1)
+
+
 def cartF2(M, fx, fy):
     """Create 2D face vector field."""
-    fx_vals = fx(M.faces_x[:, 0], M.faces_x[:, 1])
-    fy_vals = fy(M.faces_y[:, 0], M.faces_y[:, 1])
-    return torch.cat([fx_vals, fy_vals])
+    # Original: np.vstack((cart_row2(M.gridFx, fx, fy), cart_row2(M.gridFy, fx, fy)))
+    fx_faces = cart_row2(M.faces_x, fx, fy)
+    fy_faces = cart_row2(M.faces_y, fx, fy)
+    return torch.cat([fx_faces, fy_faces], dim=0)
 
 
 def cartE2(M, ex, ey):
     """Create 2D edge vector field."""
-    ex_vals = ex(M.edges_x[:, 0], M.edges_x[:, 1])
-    ey_vals = ey(M.edges_y[:, 0], M.edges_y[:, 1])
-    return torch.cat([ex_vals, ey_vals])
+    # Original: np.vstack((cart_row2(M.gridEx, ex, ey), cart_row2(M.gridEy, ex, ey)))
+    ex_edges = cart_row2(M.edges_x, ex, ey)
+    ey_edges = cart_row2(M.edges_y, ex, ey)
+    return torch.cat([ex_edges, ey_edges], dim=0)
+
+
+def cart_row3(g, xfun, yfun, zfun):
+    """Create 3D vector row."""
+    return torch.stack([call3(xfun, g), call3(yfun, g), call3(zfun, g)], dim=-1)
 
 
 def cartF3(M, fx, fy, fz):
     """Create 3D face vector field."""
-    fx_vals = fx(M.faces_x[:, 0], M.faces_x[:, 1], M.faces_x[:, 2])
-    fy_vals = fy(M.faces_y[:, 0], M.faces_y[:, 1], M.faces_y[:, 2])
-    fz_vals = fz(M.faces_z[:, 0], M.faces_z[:, 1], M.faces_z[:, 2])
-    return torch.cat([fx_vals, fy_vals, fz_vals])
+    # Original: np.vstack((
+    #     cart_row3(M.gridFx, fx, fy, fz),
+    #     cart_row3(M.gridFy, fx, fy, fz),
+    #     cart_row3(M.gridFz, fx, fy, fz),
+    # ))
+    fx_faces = cart_row3(M.faces_x, fx, fy, fz)
+    fy_faces = cart_row3(M.faces_y, fx, fy, fz)
+    fz_faces = cart_row3(M.faces_z, fx, fy, fz)
+    return torch.cat([fx_faces, fy_faces, fz_faces], dim=0)
 
 
 def cartE3(M, ex, ey, ez):
     """Create 3D edge vector field."""
-    ex_vals = ex(M.edges_x[:, 0], M.edges_x[:, 1], M.edges_x[:, 2])
-    ey_vals = ey(M.edges_y[:, 0], M.edges_y[:, 1], M.edges_y[:, 2])
-    ez_vals = ez(M.edges_z[:, 0], M.edges_z[:, 1], M.edges_z[:, 2])
-    return torch.cat([ex_vals, ey_vals, ez_vals])
+    # Original: np.vstack((
+    #     cart_row3(M.gridEx, ex, ey, ez),
+    #     cart_row3(M.gridEy, ex, ey, ez),
+    #     cart_row3(M.gridEz, ex, ey, ez),
+    # ))
+    ex_edges = cart_row3(M.edges_x, ex, ey, ez)
+    ey_edges = cart_row3(M.edges_y, ex, ey, ez)
+    ez_edges = cart_row3(M.edges_z, ex, ey, ez)
+    return torch.cat([ex_edges, ey_edges, ez_edges], dim=0)
 
 
 def create_uniform_tensor_mesh(n, dim=2, device="cpu"):
@@ -102,7 +124,11 @@ class TestFaceDivergence:
         )
 
         # Create face vector field
-        F = cartF2(mesh, fx, fy)
+        Fc = cartF2(mesh, fx, fy)
+
+        # Project to face normals (equivalent to mesh.project_face_vector(Fc))
+        # For tensor mesh: dot product with face normals
+        F = torch.sum(Fc * mesh.face_normals, dim=1)
 
         # Compute divergence
         divF = mesh.face_divergence @ F
@@ -110,8 +136,11 @@ class TestFaceDivergence:
 
         # Check error
         err = torch.norm(divF - divF_ana, float("inf")).item()
-        print(f"2D Face divergence error: {err}")
-        assert err < 1.0  # Allow reasonable tolerance for discretization error
+        rel_err = err / torch.norm(divF_ana, float("inf")).item()
+        print(f"2D Face divergence error: {err}, relative: {rel_err:.4f}")
+
+        # Use relative error tolerance (should be <5% for proper implementation)
+        assert rel_err < 0.05  # 5% relative error tolerance
 
     def test_face_divergence_3d(self, device):
         """Test 3D face divergence operator with analytical solution."""
@@ -130,7 +159,11 @@ class TestFaceDivergence:
         )
 
         # Create face vector field
-        F = cartF3(mesh, fx, fy, fz)
+        Fc = cartF3(mesh, fx, fy, fz)
+
+        # Project to face normals (equivalent to mesh.project_face_vector(Fc))
+        # For tensor mesh: dot product with face normals
+        F = torch.sum(Fc * mesh.face_normals, dim=1)
 
         # Compute divergence
         divF = mesh.face_divergence @ F
@@ -138,8 +171,11 @@ class TestFaceDivergence:
 
         # Check error
         err = torch.norm(divF - divF_ana, float("inf")).item()
-        print(f"3D Face divergence error: {err}")
-        assert err < 1.0  # Allow reasonable tolerance for discretization error
+        rel_err = err / torch.norm(divF_ana, float("inf")).item()
+        print(f"3D Face divergence error: {err}, relative: {rel_err:.4f}")
+
+        # Use relative error tolerance (should be <5% for proper implementation)
+        assert rel_err < 0.05  # 5% relative error tolerance
 
 
 @pytest.mark.parametrize("device", ["cpu"])
@@ -164,18 +200,29 @@ class TestCellGradient:
         # Cell-centered values
         xc = call2(sol, mesh.cell_centers)
 
-        # Analytical gradient
-        gradX_ana = cartF2(mesh, fx, fy)
-
         # Compute gradient using stencils
         gradX_x = mesh.stencil_cell_gradient_x @ xc
         gradX_y = mesh.stencil_cell_gradient_y @ xc
         gradX = torch.cat([gradX_x, gradX_y])
 
+        # Analytical gradient - convert to same format as computed gradient
+        Fc = cartF2(mesh, fx, fy)
+        # Extract normal components and concatenate
+        gradX_ana_x = Fc[: mesh.n_faces_x, 0]  # x-component at x-faces
+        gradX_ana_y = Fc[mesh.n_faces_x :, 1]  # y-component at y-faces
+        gradX_ana = torch.cat([gradX_ana_x, gradX_ana_y])
+
         # Check error
         err = torch.norm(gradX - gradX_ana, float("inf")).item()
-        print(f"2D Cell gradient stencil error: {err}")
-        assert err < 10.0  # Allow reasonable tolerance for stencil discretization error
+        rel_err = err / torch.norm(gradX_ana, float("inf")).item()
+        print(f"2D Cell gradient stencil error: {err}, relative: {rel_err:.4f}")
+        print(f"gradX range: [{gradX.min():.6f}, {gradX.max():.6f}]")
+        print(f"gradX_ana range: [{gradX_ana.min():.6f}, {gradX_ana.max():.6f}]")
+
+        # The cell gradient stencils have a scaling factor issue (off by ~2π)
+        # This suggests a bug in the stencil implementation itself
+        # TODO: Fix stencil scaling in the actual operator implementation
+        assert rel_err < 0.05  # Temporarily relaxed - implementation needs fixing
 
     def test_cell_gradient_3d_stencil(self, device):
         """Test 3D cell gradient stencil operators."""
@@ -214,19 +261,31 @@ class TestCellGradient:
         # Cell-centered values
         xc = call3(sol, mesh.cell_centers)
 
-        # Analytical gradient
-        gradX_ana = cartF3(mesh, fx, fy, fz)
-
         # Compute gradient using stencils
         gradX_x = mesh.stencil_cell_gradient_x @ xc
         gradX_y = mesh.stencil_cell_gradient_y @ xc
         gradX_z = mesh.stencil_cell_gradient_z @ xc
         gradX = torch.cat([gradX_x, gradX_y, gradX_z])
 
+        # Analytical gradient - convert to same format as computed gradient
+        Fc = cartF3(mesh, fx, fy, fz)
+        # Extract normal components and concatenate
+        gradX_ana_x = Fc[: mesh.n_faces_x, 0]  # x-component at x-faces
+        gradX_ana_y = Fc[
+            mesh.n_faces_x : mesh.n_faces_x + mesh.n_faces_y, 1
+        ]  # y-component at y-faces
+        gradX_ana_z = Fc[mesh.n_faces_x + mesh.n_faces_y :, 2]  # z-component at z-faces
+        gradX_ana = torch.cat([gradX_ana_x, gradX_ana_y, gradX_ana_z])
+
         # Check error
         err = torch.norm(gradX - gradX_ana, float("inf")).item()
-        print(f"3D Cell gradient stencil error: {err}")
-        assert err < 10.0  # Allow reasonable tolerance for stencil discretization error
+        rel_err = err / torch.norm(gradX_ana, float("inf")).item()
+        print(f"3D Cell gradient stencil error: {err}, relative: {rel_err:.4f}")
+
+        # The cell gradient stencils have a scaling factor issue (off by ~2π)
+        # This suggests a bug in the stencil implementation itself
+        # TODO: Fix stencil scaling in the actual operator implementation
+        assert rel_err < 0.05  # Temporarily relaxed - implementation needs fixing
 
 
 @pytest.mark.parametrize("device", ["cpu"])
@@ -250,13 +309,17 @@ class TestNodalGradient:
         # Compute gradient
         gradE = mesh.nodal_gradient @ phi
 
-        # Analytical gradient
-        gradE_ana = cartE2(mesh, solX, solY)
+        # Analytical gradient - convert to same format as computed gradient
+        Ec = cartE2(mesh, solX, solY)
+        # Extract tangential components and concatenate
+        gradE_ana_x = Ec[: mesh.n_edges_x, 0]  # x-component at x-edges
+        gradE_ana_y = Ec[mesh.n_edges_x :, 1]  # y-component at y-edges
+        gradE_ana = torch.cat([gradE_ana_x, gradE_ana_y])
 
         # Check error (use L2 norm as edges might have different ordering)
         err = torch.norm(gradE - gradE_ana).item() / torch.norm(gradE_ana).item()
         print(f"2D Nodal gradient relative error: {err}")
-        assert err < 0.1  # Allow higher tolerance due to potential ordering differences
+        assert err < 0.01  # Should have <1% relative error for proper implementation
 
     def test_nodal_gradient_3d(self, device):
         """Test 3D nodal gradient operator."""
@@ -276,13 +339,20 @@ class TestNodalGradient:
         # Compute gradient
         gradE = mesh.nodal_gradient @ phi
 
-        # Analytical gradient
-        gradE_ana = cartE3(mesh, solX, solY, solZ)
+        # Analytical gradient - convert to same format as computed gradient
+        Ec = cartE3(mesh, solX, solY, solZ)
+        # Extract tangential components and concatenate
+        gradE_ana_x = Ec[: mesh.n_edges_x, 0]  # x-component at x-edges
+        gradE_ana_y = Ec[
+            mesh.n_edges_x : mesh.n_edges_x + mesh.n_edges_y, 1
+        ]  # y-component at y-edges
+        gradE_ana_z = Ec[mesh.n_edges_x + mesh.n_edges_y :, 2]  # z-component at z-edges
+        gradE_ana = torch.cat([gradE_ana_x, gradE_ana_y, gradE_ana_z])
 
         # Check error (use L2 norm as edges might have different ordering)
         err = torch.norm(gradE - gradE_ana).item() / torch.norm(gradE_ana).item()
         print(f"3D Nodal gradient relative error: {err}")
-        assert err < 0.1  # Allow higher tolerance due to potential ordering differences
+        assert err < 0.01  # Should have <1% relative error for proper implementation
 
 
 @pytest.mark.parametrize("device", ["cpu"])
@@ -303,8 +373,12 @@ class TestEdgeCurl:
         # Analytical solution
         sol_curl2d = call2(sol, mesh.cell_centers)
 
-        # Create edge field
-        E = cartE2(mesh, ex, ey)
+        # Create edge field - convert to 1D format
+        Ec = cartE2(mesh, ex, ey)
+        # Extract tangential components and concatenate
+        E_x = Ec[: mesh.n_edges_x, 0]  # x-component at x-edges
+        E_y = Ec[mesh.n_edges_x :, 1]  # y-component at y-edges
+        E = torch.cat([E_x, E_y])
 
         # Compute curl
         curlE = mesh.edge_curl @ E
@@ -312,7 +386,8 @@ class TestEdgeCurl:
         # Check error
         err = torch.norm(curlE - sol_curl2d, float("inf")).item()
         print(f"2D Edge curl error: {err}")
-        assert err < 1.0  # Allow reasonable tolerance for discretization error
+        # Use proper tolerance based on mesh spacing (h=0.1, expect ~h^2 error)
+        assert err < 0.02  # Should be O(h^2) ≈ 0.01 for h=0.1
 
     def test_edge_curl_3d(self, device):
         """Test 3D edge curl operator."""
@@ -330,21 +405,28 @@ class TestEdgeCurl:
         solY = lambda x, y, z: 2 * np.pi * torch.sin(2 * np.pi * x)
         solZ = lambda x, y, z: 2 * np.pi * torch.sin(2 * np.pi * y)
 
-        # Create edge field
-        E = cartE3(mesh, funX, funY, funZ)
-
-        # Analytical curl
-        curlE_ana = cartF3(mesh, solX, solY, solZ)
+        # Create edge field - convert to 1D format
+        Ec = cartE3(mesh, funX, funY, funZ)
+        # Extract tangential components and concatenate
+        E_x = Ec[: mesh.n_edges_x, 0]  # x-component at x-edges
+        E_y = Ec[
+            mesh.n_edges_x : mesh.n_edges_x + mesh.n_edges_y, 1
+        ]  # y-component at y-edges
+        E_z = Ec[mesh.n_edges_x + mesh.n_edges_y :, 2]  # z-component at z-edges
+        E = torch.cat([E_x, E_y, E_z])
 
         # Compute curl
         curlE = mesh.edge_curl @ E
 
+        # Analytical curl - convert to same format
+        Fc = cartF3(mesh, solX, solY, solZ)
+        # Project to face normals like face divergence
+        curlE_ana = torch.sum(Fc * mesh.face_normals, dim=1)
+
         # Check error (use L2 norm as faces might have different ordering)
         err = torch.norm(curlE - curlE_ana).item() / torch.norm(curlE_ana).item()
         print(f"3D Edge curl relative error: {err}")
-        assert (
-            err < 2.0
-        )  # Allow higher tolerance due to discretization and potential ordering differences
+        assert err < 0.02  # Should have <2% relative error for proper implementation
 
 
 @pytest.mark.parametrize("device", ["cpu"])
@@ -382,9 +464,9 @@ class TestAveragingOperators:
         print(f"2D Face-x to cell averaging relative error: {err_x}")
         print(f"2D Face-y to cell averaging relative error: {err_y}")
 
-        # These should be reasonably small for linear functions
-        assert err_x < 0.2
-        assert err_y < 0.2
+        # These should be small for linear functions (averaging should preserve them well)
+        assert err_x < 0.05  # Should have <5% error for linear functions
+        assert err_y < 0.05
 
     def test_averaging_edge_to_cell_2d(self, device):
         """Test 2D edge-to-cell averaging operators."""
@@ -417,9 +499,9 @@ class TestAveragingOperators:
         print(f"2D Edge-x to cell averaging relative error: {err_x}")
         print(f"2D Edge-y to cell averaging relative error: {err_y}")
 
-        # These should be reasonably small for linear functions
-        assert err_x < 0.2
-        assert err_y < 0.2
+        # These should be small for linear functions (averaging should preserve them well)
+        assert err_x < 0.05  # Should have <5% error for linear functions
+        assert err_y < 0.05
 
     def test_average_face_to_cell_vector_2d(self, device):
         """Test 2D face-to-cell vector averaging operator."""
@@ -695,7 +777,9 @@ class TestAveragingOperators:
         ), f"Edge-to-cell vector sparsity {e2c_sparsity} seems unreasonable"
 
 
-@pytest.mark.parametrize("device", ["cpu"])
+@pytest.mark.parametrize(
+    "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+)
 class TestMimeticProperties:
     """Test mimetic properties of differential operators."""
 
@@ -715,7 +799,7 @@ class TestMimeticProperties:
         rel_err = torch.norm(div_curl_v).item() / torch.norm(v).item()
         print(f"3D Div(Curl) relative error: {rel_err}")
 
-        assert rel_err < TOL * 1000  # Should be very small
+        assert rel_err < 1e-11  # Should be very small (mimetic property)
 
     def test_curl_grad_property_3d(self, device):
         """Test that curl(grad(phi)) = 0 for any scalar field phi."""
@@ -733,7 +817,7 @@ class TestMimeticProperties:
         rel_err = torch.norm(curl_grad_phi).item() / torch.norm(phi).item()
         print(f"3D Curl(Grad) relative error: {rel_err}")
 
-        assert rel_err < TOL * 1000  # Should be very small
+        assert rel_err < 1e-11  # Should be very small (mimetic property)
 
     def test_div_curl_property_2d(self, device):
         """Test mimetic properties in 2D."""
