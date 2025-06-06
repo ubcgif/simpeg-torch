@@ -821,21 +821,37 @@ class DiffOperators(BaseMesh):
         return G3
 
     @property
-    def stencil_cell_gradient(self):
-        """Stencil for cell gradient operator."""
-        if getattr(self, "_stencil_cell_gradient", None) is None:
-            if self.dim == 1:
-                self._stencil_cell_gradient = self.stencil_cell_gradient_x
-            elif self.dim == 2:
-                G1 = self.stencil_cell_gradient_x
-                G2 = self.stencil_cell_gradient_y
-                self._stencil_cell_gradient = torch.cat([G1, G2], dim=0)
-            elif self.dim == 3:
-                G1 = self.stencil_cell_gradient_x
-                G2 = self.stencil_cell_gradient_y
-                G3 = self.stencil_cell_gradient_z
-                self._stencil_cell_gradient = torch.cat([G1, G2, G3], dim=0)
-        return self._stencil_cell_gradient
+    def stencil_cell_gradient(self):  # NOQA D102
+        # Documentation inherited from discretize.base.BaseMesh
+        BC = self.set_cell_gradient_BC(self._cell_gradient_BC_list)
+        if self.dim == 1:
+            G = _ddxCellGrad(self.shape_cells[0], BC[0])
+        elif self.dim == 2:
+            G1 = kron(
+                speye(self.shape_cells[1]), _ddxCellGrad(self.shape_cells[0], BC[0])
+            )
+            G2 = kron(
+                _ddxCellGrad(self.shape_cells[1], BC[1]), speye(self.shape_cells[0])
+            )
+            G = torch.vstack((G1, G2))
+        elif self.dim == 3:
+            G1 = kron3(
+                speye(self.shape_cells[2]),
+                speye(self.shape_cells[1]),
+                _ddxCellGrad(self.shape_cells[0], BC[0]),
+            )
+            G2 = kron3(
+                speye(self.shape_cells[2]),
+                _ddxCellGrad(self.shape_cells[1], BC[1]),
+                speye(self.shape_cells[0]),
+            )
+            G3 = kron3(
+                _ddxCellGrad(self.shape_cells[2], BC[2]),
+                speye(self.shape_cells[1]),
+                speye(self.shape_cells[0]),
+            )
+            G = torch.vstack((G1, G2, G3))
+        return G
 
     @property
     def cell_gradient(self):

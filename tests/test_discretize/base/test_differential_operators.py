@@ -12,6 +12,9 @@ from simpegtorch.discretize.tensor_mesh import TensorMesh
 from simpegtorch.discretize.tests import OrderTest
 from simpegtorch.discretize.tests import setup_mesh
 
+MESHTYPES = ["uniformTensorMesh"]
+
+
 # Tolerance for numerical tests
 TOL = 1e-12
 
@@ -104,90 +107,86 @@ def create_uniform_tensor_mesh(n, dim=2, device="cpu"):
     return TensorMesh(h, device=device)
 
 
-@pytest.mark.parametrize("device", ["cpu"])
-class TestFaceDivergence:
-    """Test face divergence operators."""
+class TestCurl(OrderTest):
+    name = "Curl"
+    meshTypes = MESHTYPES
+    meshDimension = 3
+    meshSizes = [8, 16, 32]
 
-    def test_face_divergence_2d(self, device):
-        """Test 2D face divergence operator with analytical solution."""
-        # Use a mesh with spacing that doesn't align with the zero points of sin
-        h = [0.1 * torch.ones(10), 0.1 * torch.ones(10)]
-        mesh = TensorMesh(h, device=device)
+    def getError(self):
+        # fun: i (cos(y)) + j (cos(z)) + k (cos(x))
+        # sol: i (sin(z)) + j (sin(x)) + k (sin(y))
 
+        funX = lambda x, y, z: torch.cos(2 * torch.pi * y)
+        funY = lambda x, y, z: torch.cos(2 * torch.pi * z)
+        funZ = lambda x, y, z: torch.cos(2 * torch.pi * x)
+
+        solX = lambda x, y, z: 2 * torch.pi * torch.sin(2 * torch.pi * z)
+        solY = lambda x, y, z: 2 * torch.pi * torch.sin(2 * torch.pi * x)
+        solZ = lambda x, y, z: 2 * torch.pi * torch.sin(2 * torch.pi * y)
+
+        # Create edge field - convert to 1D format
+        Ec = cartE3(self.M, funX, funY, funZ)
+        # Extract tangential components and concatenate
+        E_x = Ec[: self.M.n_edges_x, 0]  # x-component at x-edges
+        E_y = Ec[
+            self.M.n_edges_x : self.M.n_edges_x + self.M.n_edges_y, 1
+        ]  # y-component at y-edges
+        E_z = Ec[self.M.n_edges_x + self.M.n_edges_y :, 2]  # z-component at z-edges
+        E = torch.cat([E_x, E_y, E_z])
+
+        # Analytical curl - convert to same format
+        Fc = cartF3(self.M, solX, solY, solZ)
+        # Project to face normals like face divergence
+        curlE_ana = torch.sum(Fc * self.M.face_normals, dim=1)
+
+        curlE = self.M.edge_curl @ E
+
+        err = torch.norm(curlE - curlE_ana, float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestCurl2D(OrderTest):
+    name = "Cell Grad 2D - Dirichlet"
+    meshTypes = ["uniformTensorMesh"]
+    meshDimension = 2
+    meshSizes = [8, 16, 32, 64]
+
+    def getError(self):
         # Test function
-        fx = lambda x, y: torch.sin(2 * np.pi * x)
-        fy = lambda x, y: torch.sin(2 * np.pi * y)
-        sol = (
-            lambda x, y: 2
-            * np.pi
-            * (torch.cos(2 * np.pi * x) + torch.cos(2 * np.pi * y))
-        )
+        ex = lambda x, y: torch.cos(y)
+        ey = lambda x, y: torch.cos(x)
+        sol = lambda x, y: -torch.sin(x) + torch.sin(y)
 
-        # Create face vector field
-        Fc = cartF2(mesh, fx, fy)
+        sol_curl2d = call2(sol, self.M.cell_centers)
 
-        # Project to face normals (equivalent to mesh.project_face_vector(Fc))
-        # For tensor mesh: dot product with face normals
-        F = torch.sum(Fc * mesh.face_normals, dim=1)
+        # Create edge field - convert to 1D format
+        Ec = cartE2(self.M, ex, ey)
+        # Extract tangential components and concatenate
+        E_x = Ec[: self.M.n_edges_x, 0]  # x-component at x-edges
+        E_y = Ec[self.M.n_edges_x :, 1]  # y-component at y-edges
+        E = torch.cat([E_x, E_y])
 
-        # Compute divergence
-        divF = mesh.face_divergence @ F
-        divF_ana = call2(sol, mesh.cell_centers)
+        sol_ana = self.M.edge_curl @ E
+        err = torch.norm(sol_curl2d - sol_ana, float("inf")).item()
 
-        # Check error
-        err = torch.norm(divF - divF_ana, float("inf")).item()
-        rel_err = err / torch.norm(divF_ana, float("inf")).item()
-        print(f"2D Face divergence error: {err}, relative: {rel_err:.4f}")
+        return err
 
-        # Use relative error tolerance (should be <5% for proper implementation)
-        assert rel_err < 0.05  # 5% relative error tolerance
-
-    def test_face_divergence_3d(self, device):
-        """Test 3D face divergence operator with analytical solution."""
-        # Use a mesh with spacing that doesn't align with the zero points of sin
-        h = [0.1 * torch.ones(8), 0.1 * torch.ones(8), 0.1 * torch.ones(8)]
-        mesh = TensorMesh(h, device=device)
-
-        # Test function
-        fx = lambda x, y, z: torch.sin(2 * np.pi * x)
-        fy = lambda x, y, z: torch.sin(2 * np.pi * y)
-        fz = lambda x, y, z: torch.sin(2 * np.pi * z)
-        sol = lambda x, y, z: (
-            2 * np.pi * torch.cos(2 * np.pi * x)
-            + 2 * np.pi * torch.cos(2 * np.pi * y)
-            + 2 * np.pi * torch.cos(2 * np.pi * z)
-        )
-
-        # Create face vector field
-        Fc = cartF3(mesh, fx, fy, fz)
-
-        # Project to face normals (equivalent to mesh.project_face_vector(Fc))
-        # For tensor mesh: dot product with face normals
-        F = torch.sum(Fc * mesh.face_normals, dim=1)
-
-        # Compute divergence
-        divF = mesh.face_divergence @ F
-        divF_ana = call3(sol, mesh.cell_centers)
-
-        # Check error
-        err = torch.norm(divF - divF_ana, float("inf")).item()
-        rel_err = err / torch.norm(divF_ana, float("inf")).item()
-        print(f"3D Face divergence error: {err}, relative: {rel_err:.4f}")
-
-        # Use relative error tolerance (should be <5% for proper implementation)
-        assert rel_err < 0.05  # 5% relative error tolerance
+    def test_order(self):
+        self.orderTest()
 
 
-@pytest.mark.parametrize("device", ["cpu"])
-class TestCellGradient:
-    """Test cell gradient operators."""
+class TestCellGrad2D_Dirichlet(OrderTest):
+    name = "Cell Grad 2D - Dirichlet"
+    meshTypes = ["uniformTensorMesh"]
+    meshDimension = 2
+    meshSizes = [8, 16, 32, 64]
 
-    def test_cell_gradient_2d_stencil(self, device):
-        """Test 2D cell gradient stencil operators."""
-        # Use a mesh with spacing that doesn't align with the zero points of sin
-        h = [0.1 * torch.ones(10), 0.1 * torch.ones(10)]
-        mesh = TensorMesh(h, device=device)
-
+    def getError(self):
         # Test function
         fx = (
             lambda x, y: 2 * np.pi * torch.cos(2 * np.pi * x) * torch.sin(2 * np.pi * y)
@@ -197,39 +196,29 @@ class TestCellGradient:
         )
         sol = lambda x, y: torch.sin(2 * np.pi * x) * torch.sin(2 * np.pi * y)
 
-        # Cell-centered values
-        xc = call2(sol, mesh.cell_centers)
+        xc = call2(sol, self.M.gridCC)
 
-        # Compute gradient using stencils
-        gradX_x = mesh.stencil_cell_gradient_x @ xc
-        gradX_y = mesh.stencil_cell_gradient_y @ xc
-        gradX = torch.cat([gradX_x, gradX_y])
+        Fc = cartF2(self.M, fx, fy)
+        gradX_ana = self.M.project_face_vector(Fc)
 
-        # Analytical gradient - convert to same format as computed gradient
-        Fc = cartF2(mesh, fx, fy)
-        # Extract normal components and concatenate
-        gradX_ana_x = Fc[: mesh.n_faces_x, 0]  # x-component at x-faces
-        gradX_ana_y = Fc[mesh.n_faces_x :, 1]  # y-component at y-faces
-        gradX_ana = torch.cat([gradX_ana_x, gradX_ana_y])
+        self.M.set_cell_gradient_BC("dirichlet")
+        gradX = self.M.cell_gradient @ xc
 
-        # Check error
-        err = torch.norm(gradX - gradX_ana, float("inf")).item()
-        rel_err = err / torch.norm(gradX_ana, float("inf")).item()
-        print(f"2D Cell gradient stencil error: {err}, relative: {rel_err:.4f}")
-        print(f"gradX range: [{gradX.min():.6f}, {gradX.max():.6f}]")
-        print(f"gradX_ana range: [{gradX_ana.min():.6f}, {gradX_ana.max():.6f}]")
+        err = torch.norm((gradX - gradX_ana), float("inf")).item()
 
-        # The cell gradient stencils have a scaling factor issue (off by ~2π)
-        # This suggests a bug in the stencil implementation itself
-        # TODO: Fix stencil scaling in the actual operator implementation
-        assert rel_err < 0.05  # Temporarily relaxed - implementation needs fixing
+        return err
 
-    def test_cell_gradient_3d_stencil(self, device):
-        """Test 3D cell gradient stencil operators."""
-        # Use a mesh with spacing that doesn't align with the zero points of sin
-        h = [0.1 * torch.ones(8), 0.1 * torch.ones(8), 0.1 * torch.ones(8)]
-        mesh = TensorMesh(h, device=device)
+    def test_order(self):
+        self.orderTest()
 
+
+class TestCellGrad3D_Dirichlet(OrderTest):
+    name = "Cell Grad 3D - Dirichlet"
+    meshTypes = ["uniformTensorMesh"]
+    meshDimension = 3
+    meshSizes = [8, 16, 32]
+
+    def getError(self):
         # Test function
         fx = (
             lambda x, y, z: 2
@@ -258,34 +247,299 @@ class TestCellGradient:
             * torch.sin(2 * np.pi * z)
         )
 
-        # Cell-centered values
-        xc = call3(sol, mesh.cell_centers)
+        xc = call3(sol, self.M.gridCC)
 
-        # Compute gradient using stencils
-        gradX_x = mesh.stencil_cell_gradient_x @ xc
-        gradX_y = mesh.stencil_cell_gradient_y @ xc
-        gradX_z = mesh.stencil_cell_gradient_z @ xc
-        gradX = torch.cat([gradX_x, gradX_y, gradX_z])
+        Fc = cartF3(self.M, fx, fy, fz)
+        gradX_ana = self.M.project_face_vector(Fc)
 
-        # Analytical gradient - convert to same format as computed gradient
-        Fc = cartF3(mesh, fx, fy, fz)
-        # Extract normal components and concatenate
-        gradX_ana_x = Fc[: mesh.n_faces_x, 0]  # x-component at x-faces
-        gradX_ana_y = Fc[
-            mesh.n_faces_x : mesh.n_faces_x + mesh.n_faces_y, 1
-        ]  # y-component at y-faces
-        gradX_ana_z = Fc[mesh.n_faces_x + mesh.n_faces_y :, 2]  # z-component at z-faces
-        gradX_ana = torch.cat([gradX_ana_x, gradX_ana_y, gradX_ana_z])
+        self.M.set_cell_gradient_BC("dirichlet")
+        gradX = self.M.cell_gradient @ xc
+
+        err = torch.norm((gradX - gradX_ana), float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestCellGrad2D_Neumann(OrderTest):
+    name = "Cell Grad 2D - Neumann"
+    meshTypes = ["uniformTensorMesh"]
+    meshDimension = 2
+    meshSizes = [8, 16, 32, 64]
+
+    def getError(self):
+        # Test function
+        fx = (
+            lambda x, y: -2
+            * np.pi
+            * torch.sin(2 * np.pi * x)
+            * torch.cos(2 * np.pi * y)
+        )
+        fy = (
+            lambda x, y: -2
+            * np.pi
+            * torch.sin(2 * np.pi * y)
+            * torch.cos(2 * np.pi * x)
+        )
+        sol = lambda x, y: torch.cos(2 * np.pi * x) * torch.cos(2 * np.pi * y)
+
+        xc = call2(sol, self.M.gridCC)
+
+        Fc = cartF2(self.M, fx, fy)
+        gradX_ana = self.M.project_face_vector(Fc)
+
+        self.M.set_cell_gradient_BC("neumann")
+        gradX = self.M.cell_gradient @ xc
+
+        err = torch.norm((gradX - gradX_ana), float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestCellGrad3D_Neumann(OrderTest):
+    name = "Cell Grad 3D - Neumann"
+    meshTypes = ["uniformTensorMesh"]
+    meshDimension = 3
+    meshSizes = [8, 16, 32]
+
+    def getError(self):
+        # Test function
+        fx = (
+            lambda x, y, z: -2
+            * np.pi
+            * torch.sin(2 * np.pi * x)
+            * torch.cos(2 * np.pi * y)
+            * torch.cos(2 * np.pi * z)
+        )
+        fy = (
+            lambda x, y, z: -2
+            * np.pi
+            * torch.cos(2 * np.pi * x)
+            * torch.sin(2 * np.pi * y)
+            * torch.cos(2 * np.pi * z)
+        )
+        fz = (
+            lambda x, y, z: -2
+            * np.pi
+            * torch.cos(2 * np.pi * x)
+            * torch.cos(2 * np.pi * y)
+            * torch.sin(2 * np.pi * z)
+        )
+        sol = (
+            lambda x, y, z: torch.cos(2 * np.pi * x)
+            * torch.cos(2 * np.pi * y)
+            * torch.cos(2 * np.pi * z)
+        )
+
+        xc = call3(sol, self.M.gridCC)
+
+        Fc = cartF3(self.M, fx, fy, fz)
+        gradX_ana = self.M.project_face_vector(Fc)
+
+        self.M.set_cell_gradient_BC("neumann")
+        gradX = self.M.cell_gradient @ (xc)
+
+        err = torch.norm((gradX - gradX_ana), float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestFaceDiv3D(OrderTest):
+    name = "Face Divergence 3D"
+    meshTypes = MESHTYPES
+    meshSizes = [8, 16, 32, 64]
+
+    def getError(self):
+        # Test function
+        fx = lambda x, y, z: torch.sin(2 * np.pi * x)
+        fy = lambda x, y, z: torch.sin(2 * np.pi * y)
+        fz = lambda x, y, z: torch.sin(2 * np.pi * z)
+        sol = lambda x, y, z: (
+            2 * np.pi * torch.cos(2 * np.pi * x)
+            + 2 * np.pi * torch.cos(2 * np.pi * y)
+            + 2 * np.pi * torch.cos(2 * np.pi * z)
+        )
+
+        Fc = cartF3(self.M, fx, fy, fz)
+        F = self.M.project_face_vector(Fc)
+
+        divF = self.M.face_divergence @ F
+        divF_ana = call3(sol, self.M.gridCC)
+
+        if self._meshType == "rotateCurv":
+            # Really it is the integration we should be caring about:
+            # So, let us look at the l2 norm.
+            err = torch.norm(self.M.cell_volumes * (divF - divF_ana), 2).item()
+        else:
+            err = torch.norm((divF - divF_ana), float("inf")).item()
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestFaceDiv2D(OrderTest):
+    name = "Face Divergence 2D"
+    meshTypes = MESHTYPES
+    meshDimension = 2
+    meshSizes = [8, 16, 32, 64]
+
+    def getError(self):
+        # Test function
+        fx = lambda x, y: torch.sin(2 * np.pi * x)
+        fy = lambda x, y: torch.sin(2 * np.pi * y)
+        sol = (
+            lambda x, y: 2
+            * np.pi
+            * (torch.cos(2 * np.pi * x) + torch.cos(2 * np.pi * y))
+        )
+
+        Fc = cartF2(self.M, fx, fy)
+        F = self.M.project_face_vector(Fc)
+
+        divF = self.M.face_divergence @ F
+        divF_ana = call2(sol, self.M.gridCC)
+
+        err = torch.norm((divF - divF_ana), float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestNodalGrad(OrderTest):
+    name = "Nodal Gradient"
+    meshTypes = MESHTYPES
+
+    def getError(self):
+        # Test function
+        fun = lambda x, y, z: (torch.cos(x) + torch.cos(y) + torch.cos(z))
+        # i (sin(x)) + j (sin(y)) + k (sin(z))
+        solX = lambda x, y, z: -torch.sin(x)
+        solY = lambda x, y, z: -torch.sin(y)
+        solZ = lambda x, y, z: -torch.sin(z)
+
+        phi = call3(fun, self.M.gridN)
+        gradE = self.M.nodal_gradient @ phi
+
+        Ec = cartE3(self.M, solX, solY, solZ)
+        gradE_ana = self.M.project_edge_vector(Ec)
+
+        err = torch.norm((gradE - gradE_ana), float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+class TestNodalGrad2D(OrderTest):
+    name = "Nodal Gradient 2D"
+    meshTypes = MESHTYPES
+    meshDimension = 2
+
+    def getError(self):
+        # Test function
+        fun = lambda x, y: (torch.cos(x) + torch.cos(y))
+        # i (sin(x)) + j (sin(y)) + k (sin(z))
+        solX = lambda x, y: -torch.sin(x)
+        solY = lambda x, y: -torch.sin(y)
+
+        phi = call2(fun, self.M.gridN)
+        gradE = self.M.nodal_gradient @ phi
+
+        Ec = cartE2(self.M, solX, solY)
+        gradE_ana = self.M.project_edge_vector(Ec)
+
+        err = torch.norm((gradE - gradE_ana), float("inf")).item()
+
+        return err
+
+    def test_order(self):
+        self.orderTest()
+
+
+@pytest.mark.parametrize("device", ["cpu"])
+class TestFaceDivergence:
+    """Test face divergence operators."""
+
+    def test_face_divergence_2d(self, device):
+        """Test 2D face divergence operator with analytical solution."""
+        # Use a mesh with spacing that doesn't align with the zero points of sin
+        h = [0.1 * torch.ones(10), 0.1 * torch.ones(10)]
+        mesh = TensorMesh(h, device=device)
+
+        # Test function
+        fx = lambda x, y: torch.sin(2 * torch.pi * x)
+        fy = lambda x, y: torch.sin(2 * torch.pi * y)
+        sol = (
+            lambda x, y: 2
+            * torch.pi
+            * (torch.cos(2 * torch.pi * x) + torch.cos(2 * torch.pi * y))
+        )
+
+        # Create face vector field
+        Fc = cartF2(mesh, fx, fy)
+
+        # Project to face normals (equivalent to mesh.project_face_vector(Fc))
+        # For tensor mesh: dot product with face normals
+        F = torch.sum(Fc * mesh.face_normals, dim=1)
+
+        # Compute divergence
+        divF = mesh.face_divergence @ F
+        divF_ana = call2(sol, mesh.cell_centers)
 
         # Check error
-        err = torch.norm(gradX - gradX_ana, float("inf")).item()
-        rel_err = err / torch.norm(gradX_ana, float("inf")).item()
-        print(f"3D Cell gradient stencil error: {err}, relative: {rel_err:.4f}")
+        err = torch.norm(divF - divF_ana, float("inf")).item()
+        rel_err = err / torch.norm(divF_ana, float("inf")).item()
+        print(f"2D Face divergence error: {err}, relative: {rel_err:.4f}")
 
-        # The cell gradient stencils have a scaling factor issue (off by ~2π)
-        # This suggests a bug in the stencil implementation itself
-        # TODO: Fix stencil scaling in the actual operator implementation
-        assert rel_err < 0.05  # Temporarily relaxed - implementation needs fixing
+        # Use relative error tolerance (should be <5% for proper implementation)
+        assert rel_err < 0.05  # 5% relative error tolerance
+
+    def test_face_divergence_3d(self, device):
+        """Test 3D face divergence operator with analytical solution."""
+        # Use a mesh with spacing that doesn't align with the zero points of sin
+        h = [0.1 * torch.ones(8), 0.1 * torch.ones(8), 0.1 * torch.ones(8)]
+        mesh = TensorMesh(h, device=device)
+
+        # Test function
+        fx = lambda x, y, z: torch.sin(2 * torch.pi * x)
+        fy = lambda x, y, z: torch.sin(2 * torch.pi * y)
+        fz = lambda x, y, z: torch.sin(2 * torch.pi * z)
+        sol = lambda x, y, z: (
+            2 * torch.pi * torch.cos(2 * torch.pi * x)
+            + 2 * torch.pi * torch.cos(2 * torch.pi * y)
+            + 2 * torch.pi * torch.cos(2 * torch.pi * z)
+        )
+
+        # Create face vector field
+        Fc = cartF3(mesh, fx, fy, fz)
+
+        # Project to face normals (equivalent to mesh.project_face_vector(Fc))
+        # For tensor mesh: dot product with face normals
+        F = torch.sum(Fc * mesh.face_normals, dim=1)
+
+        # Compute divergence
+        divF = mesh.face_divergence @ F
+        divF_ana = call3(sol, mesh.cell_centers)
+
+        # Check error
+        err = torch.norm(divF - divF_ana, float("inf")).item()
+        rel_err = err / torch.norm(divF_ana, float("inf")).item()
+        print(f"3D Face divergence error: {err}, relative: {rel_err:.4f}")
+
+        # Use relative error tolerance (should be <5% for proper implementation)
+        assert rel_err < 0.05  # 5% relative error tolerance
 
 
 @pytest.mark.parametrize("device", ["cpu"])
@@ -397,13 +651,13 @@ class TestEdgeCurl:
 
         # Test function: i(cos(y)) + j(cos(z)) + k(cos(x))
         # Solution: i(sin(z)) + j(sin(x)) + k(sin(y))
-        funX = lambda x, y, z: torch.cos(2 * np.pi * y)
-        funY = lambda x, y, z: torch.cos(2 * np.pi * z)
-        funZ = lambda x, y, z: torch.cos(2 * np.pi * x)
+        funX = lambda x, y, z: torch.cos(2 * torch.pi * y)
+        funY = lambda x, y, z: torch.cos(2 * torch.pi * z)
+        funZ = lambda x, y, z: torch.cos(2 * torch.pi * x)
 
-        solX = lambda x, y, z: 2 * np.pi * torch.sin(2 * np.pi * z)
-        solY = lambda x, y, z: 2 * np.pi * torch.sin(2 * np.pi * x)
-        solZ = lambda x, y, z: 2 * np.pi * torch.sin(2 * np.pi * y)
+        solX = lambda x, y, z: 2 * torch.pi * torch.sin(2 * torch.pi * z)
+        solY = lambda x, y, z: 2 * torch.pi * torch.sin(2 * torch.pi * x)
+        solZ = lambda x, y, z: 2 * torch.pi * torch.sin(2 * torch.pi * y)
 
         # Create edge field - convert to 1D format
         Ec = cartE3(mesh, funX, funY, funZ)
@@ -854,8 +1108,8 @@ class TestAveraging1D(OrderTest):
     def test_orderN2CC(self):
         self.name = "Averaging 1D: N2CC"
         fun = lambda x: torch.cos(x)
-        self.getHere = lambda M: fun(M.gridN)
-        self.getThere = lambda M: fun(M.gridCC)
+        self.getHere = lambda M: fun(M.nodes)
+        self.getThere = lambda M: fun(M.cell_centers)
         self.getAve = lambda M: M.aveN2CC
         self.orderTest()
 
@@ -863,7 +1117,7 @@ class TestAveraging1D(OrderTest):
         self.name = "Averaging 1D: N2F"
         fun = lambda x: torch.cos(x)
         M, _ = setup_mesh("uniformTensorMesh", 32, 1)
-        v1 = M.aveN2F @ fun(M.gridN)
+        v1 = M.aveN2F @ fun(M.nodes)
         if v1.is_sparse:
             v1 = v1.to_dense()
         v2 = fun(M.faces)
@@ -872,7 +1126,7 @@ class TestAveraging1D(OrderTest):
     def test_orderN2E(self):
         self.name = "Averaging 1D: N2E"
         fun = lambda x: torch.cos(x)
-        self.getHere = lambda M: fun(M.gridN)
+        self.getHere = lambda M: fun(M.nodes)
         self.getThere = lambda M: fun(M.edges)
         self.getAve = lambda M: M.aveN2E
         self.orderTest()
@@ -881,7 +1135,7 @@ class TestAveraging1D(OrderTest):
         self.name = "Averaging 1D: F2CC"
         fun = lambda x: torch.cos(x)
         self.getHere = lambda M: fun(M.faces)
-        self.getThere = lambda M: fun(M.gridCC)
+        self.getThere = lambda M: fun(M.cell_centers)
         self.getAve = lambda M: M.aveF2CC
         self.orderTest()
 
@@ -896,7 +1150,7 @@ class TestAveraging1D(OrderTest):
     def test_orderCC2F(self):
         self.name = "Averaging 1D: CC2F"
         fun = lambda x: torch.cos(x)
-        self.getHere = lambda M: fun(M.gridCC)
+        self.getHere = lambda M: fun(M.cell_centers)
         self.getThere = lambda M: fun(M.faces)
         self.getAve = lambda M: M.aveCC2F
         self.expectedOrders = 1
@@ -910,7 +1164,7 @@ class TestAveraging1D(OrderTest):
         v1 = M.aveE2CC @ fun(M.edges)
         if v1.is_sparse:
             v1 = v1.to_dense()
-        v2 = fun(M.gridCC)
+        v2 = fun(M.cell_centers)
         assert torch.allclose(v1, v2)
 
     def test_exactE2CCV(self):
@@ -920,14 +1174,14 @@ class TestAveraging1D(OrderTest):
         v1 = M.aveE2CCV @ fun(M.edges)
         if v1.is_sparse:
             v1 = v1.to_dense()
-        v2 = fun(M.gridCC)
+        v2 = fun(M.cell_centers)
         assert torch.allclose(v1, v2)
 
     def test_exactCC2E(self):
         self.name = "Averaging 1D: cell_centers_to_edges"
         fun = lambda x: torch.cos(x)
         M, _ = setup_mesh("uniformTensorMesh", 32, 1)
-        v1 = M.average_cell_to_edge @ fun(M.gridCC)
+        v1 = M.average_cell_to_edge @ fun(M.cell_centers)
         if v1.is_sparse:
             v1 = v1.to_dense()
         v2 = fun(M.edges)
@@ -936,7 +1190,7 @@ class TestAveraging1D(OrderTest):
     def test_orderCC2FV(self):
         self.name = "Averaging 1D: CC2FV"
         fun = lambda x: torch.cos(x)
-        self.getHere = lambda M: fun(M.gridCC)
+        self.getHere = lambda M: fun(M.cell_centers)
         self.getThere = lambda M: fun(M.faces)
         self.getAve = lambda M: M.aveCCV2F
         self.expectedOrders = 1
@@ -970,17 +1224,17 @@ class TestAveraging2D(OrderTest):
     def test_orderN2CC(self):
         self.name = "Averaging 2D: N2CC"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: call2(fun, M.gridN)
-        self.getThere = lambda M: call2(fun, M.gridCC)
+        self.getHere = lambda M: call2(fun, M.nodes)
+        self.getThere = lambda M: call2(fun, M.cell_centers)
         self.getAve = lambda M: M.aveN2CC
         self.orderTest()
 
     def test_orderN2F(self):
         self.name = "Averaging 2D: N2F"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: call2(fun, M.gridN)
+        self.getHere = lambda M: call2(fun, M.nodes)
         self.getThere = lambda M: torch.cat(
-            [call2(fun, M.gridFx), call2(fun, M.gridFy)]
+            [call2(fun, M.faces_x), call2(fun, M.faces_y)]
         )
         self.getAve = lambda M: M.aveN2F
         self.orderTest()
@@ -988,9 +1242,9 @@ class TestAveraging2D(OrderTest):
     def test_orderN2E(self):
         self.name = "Averaging 2D: N2E"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: call2(fun, M.gridN)
+        self.getHere = lambda M: call2(fun, M.nodes)
         self.getThere = lambda M: torch.cat(
-            [call2(fun, M.gridEx), call2(fun, M.gridEy)]
+            [call2(fun, M.edges_x), call2(fun, M.edges_y)]
         )
         self.getAve = lambda M: M.aveN2E
         self.orderTest()
@@ -998,8 +1252,10 @@ class TestAveraging2D(OrderTest):
     def test_orderF2CC(self):
         self.name = "Averaging 2D: F2CC"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: torch.cat([call2(fun, M.gridFx), call2(fun, M.gridFy)])
-        self.getThere = lambda M: call2(fun, M.gridCC)
+        self.getHere = lambda M: torch.cat(
+            [call2(fun, M.faces_x), call2(fun, M.faces_y)]
+        )
+        self.getThere = lambda M: call2(fun, M.cell_centers)
         self.getAve = lambda M: M.aveF2CC
         self.orderTest()
 
@@ -1008,10 +1264,10 @@ class TestAveraging2D(OrderTest):
         funX = lambda x, y: (torch.cos(x) + torch.sin(y))
         funY = lambda x, y: (torch.cos(y) * torch.sin(x))
         self.getHere = lambda M: torch.cat(
-            [call2(funX, M.gridFx), call2(funY, M.gridFy)]
+            [call2(funX, M.faces_x), call2(funY, M.faces_y)]
         )
         self.getThere = lambda M: torch.cat(
-            [call2(funX, M.gridCC), call2(funY, M.gridCC)]
+            [call2(funX, M.cell_centers), call2(funY, M.cell_centers)]
         )
         self.getAve = lambda M: M.aveF2CCV
         self.orderTest()
@@ -1019,9 +1275,9 @@ class TestAveraging2D(OrderTest):
     def test_orderCC2F(self):
         self.name = "Averaging 2D: CC2F"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: call2(fun, M.gridCC)
+        self.getHere = lambda M: call2(fun, M.cell_centers)
         self.getThere = lambda M: torch.cat(
-            [call2(fun, M.gridFx), call2(fun, M.gridFy)]
+            [call2(fun, M.faces_x), call2(fun, M.faces_y)]
         )
         self.getAve = lambda M: M.aveCC2F
         self.expectedOrders = torch.tensor([2.0]) / 2.0
@@ -1031,8 +1287,10 @@ class TestAveraging2D(OrderTest):
     def test_orderE2CC(self):
         self.name = "Averaging 2D: E2CC"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: torch.cat([call2(fun, M.gridEx), call2(fun, M.gridEy)])
-        self.getThere = lambda M: call2(fun, M.gridCC)
+        self.getHere = lambda M: torch.cat(
+            [call2(fun, M.edges_x), call2(fun, M.edges_y)]
+        )
+        self.getThere = lambda M: call2(fun, M.cell_centers)
         self.getAve = lambda M: M.aveE2CC
         self.orderTest()
 
@@ -1041,10 +1299,10 @@ class TestAveraging2D(OrderTest):
         funX = lambda x, y: (torch.cos(x) + torch.sin(y))
         funY = lambda x, y: (torch.cos(y) * torch.sin(x))
         self.getHere = lambda M: torch.cat(
-            [call2(funX, M.gridEx), call2(funY, M.gridEy)]
+            [call2(funX, M.edges_x), call2(funY, M.edges_y)]
         )
         self.getThere = lambda M: torch.cat(
-            [call2(funX, M.gridCC), call2(funY, M.gridCC)]
+            [call2(funX, M.cell_centers), call2(funY, M.cell_centers)]
         )
         self.getAve = lambda M: M.aveE2CCV
         self.orderTest()
@@ -1052,7 +1310,7 @@ class TestAveraging2D(OrderTest):
     def test_orderCC2E(self):
         self.name = "Averaging 2D: cell_centers_to_edges"
         fun = lambda x, y: (torch.cos(x) + torch.sin(y))
-        self.getHere = lambda M: call2(fun, M.gridCC)
+        self.getHere = lambda M: call2(fun, M.cell_centers)
         self.getThere = lambda M: call2(fun, M.edges)
         self.getAve = lambda M: M.average_cell_to_edge
         self.expectedOrders = torch.tensor([2.0]) / 2.0
@@ -1064,10 +1322,10 @@ class TestAveraging2D(OrderTest):
         funX = lambda x, y: (torch.cos(x) + torch.sin(y))
         funY = lambda x, y: (torch.cos(y) * torch.sin(x))
         self.getHere = lambda M: torch.cat(
-            [call2(funX, M.gridCC), call2(funY, M.gridCC)]
+            [call2(funX, M.cell_centers), call2(funY, M.cell_centers)]
         )
         self.getThere = lambda M: torch.cat(
-            [call2(funX, M.gridFx), call2(funY, M.gridFy)]
+            [call2(funX, M.faces_x), call2(funY, M.faces_y)]
         )
         self.getAve = lambda M: M.aveCCV2F
         self.expectedOrders = torch.tensor([2.0]) / 2.0
@@ -1091,17 +1349,17 @@ class TestAveraging3D(OrderTest):
     def test_orderN2CC(self):
         self.name = "Averaging 3D: N2CC"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
-        self.getHere = lambda M: call3(fun, M.gridN)
-        self.getThere = lambda M: call3(fun, M.gridCC)
+        self.getHere = lambda M: call3(fun, M.nodes)
+        self.getThere = lambda M: call3(fun, M.cell_centers)
         self.getAve = lambda M: M.aveN2CC
         self.orderTest()
 
     def test_orderN2F(self):
         self.name = "Averaging 3D: N2F"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
-        self.getHere = lambda M: call3(fun, M.gridN)
+        self.getHere = lambda M: call3(fun, M.nodes)
         self.getThere = lambda M: torch.cat(
-            [call3(fun, M.gridFx), call3(fun, M.gridFy), call3(fun, M.gridFz)]
+            [call3(fun, M.faces_x), call3(fun, M.faces_y), call3(fun, M.faces_z)]
         )
         self.getAve = lambda M: M.aveN2F
         self.orderTest()
@@ -1109,9 +1367,9 @@ class TestAveraging3D(OrderTest):
     def test_orderN2E(self):
         self.name = "Averaging 3D: N2E"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
-        self.getHere = lambda M: call3(fun, M.gridN)
+        self.getHere = lambda M: call3(fun, M.nodes)
         self.getThere = lambda M: torch.cat(
-            [call3(fun, M.gridEx), call3(fun, M.gridEy), call3(fun, M.gridEz)]
+            [call3(fun, M.edges_x), call3(fun, M.edges_y), call3(fun, M.edges_z)]
         )
         self.getAve = lambda M: M.aveN2E
         self.orderTest()
@@ -1120,9 +1378,9 @@ class TestAveraging3D(OrderTest):
         self.name = "Averaging 3D: F2CC"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
         self.getHere = lambda M: torch.cat(
-            [call3(fun, M.gridFx), call3(fun, M.gridFy), call3(fun, M.gridFz)]
+            [call3(fun, M.faces_x), call3(fun, M.faces_y), call3(fun, M.faces_z)]
         )
-        self.getThere = lambda M: call3(fun, M.gridCC)
+        self.getThere = lambda M: call3(fun, M.cell_centers)
         self.getAve = lambda M: M.aveF2CC
         self.orderTest()
 
@@ -1132,10 +1390,14 @@ class TestAveraging3D(OrderTest):
         funY = lambda x, y, z: (torch.cos(x) + torch.sin(y) * torch.exp(z))
         funZ = lambda x, y, z: (torch.cos(x) * torch.sin(y) + torch.exp(z))
         self.getHere = lambda M: torch.cat(
-            [call3(funX, M.gridFx), call3(funY, M.gridFy), call3(funZ, M.gridFz)]
+            [call3(funX, M.faces_x), call3(funY, M.faces_y), call3(funZ, M.faces_z)]
         )
         self.getThere = lambda M: torch.cat(
-            [call3(funX, M.gridCC), call3(funY, M.gridCC), call3(funZ, M.gridCC)]
+            [
+                call3(funX, M.cell_centers),
+                call3(funY, M.cell_centers),
+                call3(funZ, M.cell_centers),
+            ]
         )
         self.getAve = lambda M: M.aveF2CCV
         self.orderTest()
@@ -1144,9 +1406,9 @@ class TestAveraging3D(OrderTest):
         self.name = "Averaging 3D: E2CC"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
         self.getHere = lambda M: torch.cat(
-            [call3(fun, M.gridEx), call3(fun, M.gridEy), call3(fun, M.gridEz)]
+            [call3(fun, M.edges_x), call3(fun, M.edges_y), call3(fun, M.edges_z)]
         )
-        self.getThere = lambda M: call3(fun, M.gridCC)
+        self.getThere = lambda M: call3(fun, M.cell_centers)
         self.getAve = lambda M: M.aveE2CC
         self.orderTest()
 
@@ -1156,10 +1418,14 @@ class TestAveraging3D(OrderTest):
         funY = lambda x, y, z: (torch.cos(x) + torch.sin(y) * torch.exp(z))
         funZ = lambda x, y, z: (torch.cos(x) * torch.sin(y) + torch.exp(z))
         self.getHere = lambda M: torch.cat(
-            [call3(funX, M.gridEx), call3(funY, M.gridEy), call3(funZ, M.gridEz)]
+            [call3(funX, M.edges_x), call3(funY, M.edges_y), call3(funZ, M.edges_z)]
         )
         self.getThere = lambda M: torch.cat(
-            [call3(funX, M.gridCC), call3(funY, M.gridCC), call3(funZ, M.gridCC)]
+            [
+                call3(funX, M.cell_centers),
+                call3(funY, M.cell_centers),
+                call3(funZ, M.cell_centers),
+            ]
         )
         self.getAve = lambda M: M.aveE2CCV
         self.expectedOrders = torch.tensor([2.0])
@@ -1168,9 +1434,9 @@ class TestAveraging3D(OrderTest):
     def test_orderCC2F(self):
         self.name = "Averaging 3D: CC2F"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
-        self.getHere = lambda M: call3(fun, M.gridCC)
+        self.getHere = lambda M: call3(fun, M.cell_centers)
         self.getThere = lambda M: torch.cat(
-            [call3(fun, M.gridFx), call3(fun, M.gridFy), call3(fun, M.gridFz)]
+            [call3(fun, M.faces_x), call3(fun, M.faces_y), call3(fun, M.faces_z)]
         )
         self.getAve = lambda M: M.aveCC2F
         self.expectedOrders = torch.tensor([2.0]) / 2.0
@@ -1180,7 +1446,7 @@ class TestAveraging3D(OrderTest):
     def test_orderCC2E(self):
         self.name = "Averaging 3D: CC2E"
         fun = lambda x, y, z: (torch.cos(x) + torch.sin(y) + torch.exp(z))
-        self.getHere = lambda M: call3(fun, M.gridCC)
+        self.getHere = lambda M: call3(fun, M.cell_centers)
         self.getThere = lambda M: call3(fun, M.edges)
         self.getAve = lambda M: M.average_cell_to_edge
         self.expectedOrders = torch.tensor([2.0]) / 2.0
@@ -1193,10 +1459,14 @@ class TestAveraging3D(OrderTest):
         funY = lambda x, y, z: (torch.cos(x) + torch.sin(y) * torch.exp(z))
         funZ = lambda x, y, z: (torch.cos(x) * torch.sin(y) + torch.exp(z))
         self.getHere = lambda M: torch.cat(
-            [call3(funX, M.gridCC), call3(funY, M.gridCC), call3(funZ, M.gridCC)]
+            [
+                call3(funX, M.cell_centers),
+                call3(funY, M.cell_centers),
+                call3(funZ, M.cell_centers),
+            ]
         )
         self.getThere = lambda M: torch.cat(
-            [call3(funX, M.gridFx), call3(funY, M.gridFy), call3(funZ, M.gridFz)]
+            [call3(funX, M.faces_x), call3(funY, M.faces_y), call3(funZ, M.faces_z)]
         )
         self.getAve = lambda M: M.aveCCV2F
         self.expectedOrders = torch.tensor([2.0]) / 2.0
