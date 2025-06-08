@@ -43,23 +43,32 @@ torch.set_default_dtype(torch.float64)
 TOL = 1e-8
 
 
+# Device fixtures for testing across different devices
+@pytest.fixture(params=["cpu"] + (["cuda"] if torch.cuda.is_available() else []))
+def device(request):
+    """Pytest fixture to test on CPU and CUDA (if available)."""
+    return torch.device(request.param)
+
+
 @pytest.fixture
-def vectors():
+def vectors(device):
     return {
-        "a": torch.tensor([1, 2, 3]),
-        "b": torch.tensor([1, 2]),
-        "c": torch.tensor([1, 2, 3, 4]),
+        "a": torch.tensor([1, 2, 3], device=device),
+        "b": torch.tensor([1, 2], device=device),
+        "c": torch.tensor([1, 2, 3, 4], device=device),
     }
 
 
-def test_mkvc1(vectors):
+def test_mkvc1(vectors, device):
     x = mkvc(vectors["a"])
     assert x.shape == (3,)
+    assert x.device == device
 
 
-def test_mkvc2(vectors):
+def test_mkvc2(vectors, device):
     x = mkvc(vectors["a"], 2)
     assert x.shape == (3, 1)
+    assert x.device == device
 
 
 def test_mkvc3(vectors):
@@ -67,26 +76,36 @@ def test_mkvc3(vectors):
     assert x.shape == (3, 1, 1)
 
 
-def test_ndgrid_3D():
-    a = torch.tensor([1, 2, 3])
-    b = torch.tensor([1, 2])
-    c = torch.tensor([1, 2, 3, 4])
+@pytest.mark.parametrize(
+    "device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+)
+def test_ndgrid_3D(device):
+    device = torch.device(device)
+    a = torch.tensor([1, 2, 3], device=device)
+    b = torch.tensor([1, 2], device=device)
+    c = torch.tensor([1, 2, 3, 4], device=device)
 
-    XYZ = ndgrid([a, b, c])  # Make sure this returns a Fortran-stacked grid
+    XYZ = ndgrid(
+        [a, b, c], device=device
+    )  # Make sure this returns a Fortran-stacked grid
 
     X1_test = torch.tensor(
-        [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3]
+        [1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 2, 3],
+        device=device,
     )
     X2_test = torch.tensor(
-        [1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2]
+        [1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2, 1, 1, 1, 2, 2, 2],
+        device=device,
     )
     X3_test = torch.tensor(
-        [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4]
+        [1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4],
+        device=device,
     )
 
     assert torch.all(XYZ[:, 0] == X1_test)
     assert torch.all(XYZ[:, 1] == X2_test)
     assert torch.all(XYZ[:, 2] == X3_test)
+    assert XYZ.device == device
 
 
 def test_sub2ind():

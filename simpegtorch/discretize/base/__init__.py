@@ -15,5 +15,6 @@ Base Mesh Class
   BaseTensorMesh
 """
 
+from .base_mesh import BaseMesh
 from .base_regular_mesh import BaseRegularMesh, BaseRectangularMesh
 from .base_tensor_mesh import BaseTensorMesh
