@@ -15,7 +15,7 @@ def test_dc_simulation_fields_with_gradients():
     """Test complete DC simulation with field computation and gradients."""
 
     # Create a simple 2D mesh
-    mesh = TensorMesh([4, 4], dtype=torch.float64)
+    mesh = TensorMesh([4, 4, 4], dtype=torch.float64)
 
     # Create DC simulation
     sim = DCStaticSimulationCellCentered(mesh)
