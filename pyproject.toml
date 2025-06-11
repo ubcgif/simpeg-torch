@@ -247,5 +247,6 @@ rst-roles = [
 
 [tool.pytest.ini_options]
 filterwarnings = [
-    "ignore:Sparse CSR tensor support is in beta state.*:UserWarning"
+    "ignore:Sparse CSR tensor support is in beta state.*:UserWarning",
+    "ignore:Creating a tensor from a list of numpy.ndarrays is extremely slow."
 ]
