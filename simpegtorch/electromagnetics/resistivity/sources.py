@@ -96,28 +96,62 @@ class BaseSrc:
 
         Parameters
         ----------
-        simulation : DCStaticSimulationCellCentered
+        simulation : DCStaticSimulation
             The DC resistivity simulation
 
         Returns
         -------
         torch.Tensor
-            Right-hand side vector for this source, shape (n_cells,)
+            Right-hand side vector for this source
         """
-        mesh = simulation.mesh
 
-        # Find closest cell centers to source locations
-        cell_centers = mesh.cell_centers  # torch.Tensor of shape (n_cells, dim)
+        # Check if this is a nodal or cell-centered formulation
+        if hasattr(simulation, "_formulation") and simulation._formulation == "EB":
+            # Nodal formulation: interpolate sources to nodes
+            return self._evaluate_nodal(simulation)
+        elif hasattr(simulation, "bc_type") and hasattr(simulation, "getA"):
+            # Likely nodal DC simulation based on attributes
+            return self._evaluate_nodal(simulation)
+        else:
+            # Cell-centered formulation: place sources at cell centers
+            return self._evaluate_cell_centered(simulation)
+
+    def _evaluate_cell_centered(self, simulation):
+        """Evaluate source for cell-centered formulation"""
+        mesh = simulation.mesh
+        cell_centers = mesh.cell_centers
 
         # Initialize RHS vector
         q = torch.zeros(mesh.nC, dtype=torch.float64, device=mesh.device)
 
         # For each electrode location, find closest cell and add current
-        for _i, (loc, curr) in enumerate(zip(self.location, self.current)):
+        for loc, curr in zip(self.location, self.current):
             # Compute distances from this electrode to all cell centers
             distances = torch.norm(cell_centers - loc.unsqueeze(0), dim=1)
             closest_cell = torch.argmin(distances)
             q[closest_cell] += curr
+
+        return q
+
+    def _evaluate_nodal(self, simulation):
+        """Evaluate source for nodal formulation using interpolation"""
+        mesh = simulation.mesh
+
+        # For nodal formulation, we need to interpolate to nodes
+        # This is similar to original SimPEG's approach
+
+        # Initialize RHS vector for nodes
+        q = torch.zeros(mesh.nN, dtype=torch.float64, device=mesh.device)
+
+        # Get node locations
+        nodes = mesh.gridN  # torch.Tensor of shape (n_nodes, dim)
+
+        # For each electrode location, find closest nodes and interpolate
+        for loc, curr in zip(self.location, self.current):
+            # Simple approach: find closest node (could be improved with proper interpolation)
+            distances = torch.norm(nodes - loc.unsqueeze(0), dim=1)
+            closest_node = torch.argmin(distances)
+            q[closest_node] += curr
 
         return q
 
