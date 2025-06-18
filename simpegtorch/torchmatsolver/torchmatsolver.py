@@ -8,13 +8,10 @@ import scipy.sparse as sp
 
 class TorchMatSolver(Function):
     @staticmethod
-    def forward(ctx, A, b, solve_fn):
+    def forward(A, b, solve_fn):
         """
         Forward pass to solve Ax = b using pymatsolver.
         """
-        ctx.save_for_backward(A, b)
-        ctx.solve_fn = solve_fn
-
         ## Check if A is a sparse matrix
         if isinstance(A, torch.Tensor) and A.is_sparse:
             A_coalesced = A.coalesce()
@@ -47,6 +44,81 @@ class TorchMatSolver(Function):
             raise TypeError("Input A must be a torch sparse COO or CSR tensor.")
 
         return torch.tensor(x, dtype=b.dtype, device=b.device)
+
+    @staticmethod
+    def setup_context(ctx, inputs, output):
+        """
+        Setup context for the backward pass.
+        """
+        A, b, solve_fn = inputs
+        ctx.save_for_backward(A, b)
+        ctx.solve_fn = solve_fn
+
+        # Ensure A and b are tensors
+        if not isinstance(A, torch.Tensor) or not isinstance(b, torch.Tensor):
+            raise TypeError("Inputs A and b must be torch tensors.")
+
+        # Check if A is a sparse tensor
+        if not (A.is_sparse or A.is_sparse_csr):
+            raise TypeError("Input A must be a torch sparse COO or CSR tensor.")
+
+    @staticmethod
+    def vmap(info, in_dims, A, b, solve_fn):
+        """
+        Vectorized map function to handle multiple inputs.
+        Simple batching by applying the function multiple times.
+        """
+        A_bdim, b_bdim, _ = in_dims
+
+        # Determine batch size from the batched dimension
+        if A_bdim is not None:
+            batch_size = A.shape[A_bdim]
+        elif b_bdim is not None:
+            batch_size = b.shape[b_bdim]
+        else:
+            # No batching needed
+            return TorchMatSolver.apply(A, b, solve_fn), 0
+
+        # Handle different batching scenarios
+        if A_bdim is not None and b_bdim is not None:
+            # Both A and b are batched
+            if A_bdim != 0 or b_bdim != 0:
+                raise NotImplementedError("Only batching on dimension 0 is supported")
+
+            results = []
+            for i in range(batch_size):
+                A_i = A[i]  # Extract i-th matrix
+                b_i = b[i]  # Extract i-th vector
+                x_i = TorchMatSolver.apply(A_i, b_i, solve_fn)
+                results.append(x_i)
+
+            return torch.stack(results, dim=0), 0
+
+        elif A_bdim is not None:
+            # Only A is batched, b is broadcast
+            if A_bdim != 0:
+                raise NotImplementedError("Only batching on dimension 0 is supported")
+
+            results = []
+            for i in range(batch_size):
+                A_i = A[i]  # Extract i-th matrix
+                x_i = TorchMatSolver.apply(A_i, b, solve_fn)
+                results.append(x_i)
+
+            return torch.stack(results, dim=0), 0
+
+        elif b_bdim is not None:
+            # Only b is batched, A is broadcast
+            if b_bdim != 0:
+                raise NotImplementedError("Only batching on dimension 0 is supported")
+
+            results = []
+            for i in range(batch_size):
+                b_i = b[i]  # Extract i-th vector
+                x_i = TorchMatSolver.apply(A, b_i, solve_fn)
+                results.append(x_i)
+
+            return torch.stack(results, dim=0), 0
 
     @staticmethod
     def backward(ctx, grad_output):

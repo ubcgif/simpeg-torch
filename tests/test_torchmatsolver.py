@@ -190,6 +190,41 @@ def test_solve_accuracy():
     assert torch.max(torch.abs(residual)) < 1e-10
 
 
+def test_vmap():
+    """Tests batching with vmap functionality"""
+    # Create a well-conditioned sparse system
+    indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
+    values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
+    A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
+    b = torch.tensor([11.0, 11.0], requires_grad=True)
+    A_b = A.unsqueeze(0)  # Add batch dimension
+    A_batched = torch.cat([A_b, A_b, A_b], dim=0)  # Batch of 3 identical matrices
+
+    b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
+
+    def solve_fn(A, b):
+        return sparse.linalg.spsolve(A, b)
+
+    # Use TorchMatSolver with vmap
+    x_batched = torch.vmap(lambda A, b: TorchMatSolver.apply(A, b, solve_fn))(
+        A_batched, b_batched
+    )
+
+    # test batching over only rhs
+    x_batched_rhs = torch.vmap(
+        lambda A, b: TorchMatSolver.apply(A, b, solve_fn), in_dims=(None, 0)
+    )(A, b_batched)
+
+    # test batching over only A
+    x_batched_A = torch.vmap(
+        lambda A, b: TorchMatSolver.apply(A, b, solve_fn), in_dims=(0, None)
+    )(A_batched, b)
+
+    assert x_batched.shape == (3, 2)  # Should return a batch of solutions
+    assert x_batched_rhs.shape == (3, 2)  # Should return a batch of solutions
+    assert x_batched_A.shape == (3, 2)  # Should return a batch of solutions
+
+
 def test_large_sparse_matrix_efficiency():
     """Test that large sparse matrices don't create dense intermediates"""
     # Create a larger sparse system to test memory efficiency

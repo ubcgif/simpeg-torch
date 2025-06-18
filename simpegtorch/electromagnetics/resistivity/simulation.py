@@ -42,6 +42,7 @@ class DCStaticSimulationCellCentered:
         self.Grad = self.Div.T
         if self.bc_type == "Dirichlet":
             print("Homogeneous Dirichlet is the natural BC for this CC discretization")
+            return
         elif self.bc_type.lower() == "neumann":
             alpha, beta, gamma = 0, 1, 0
         else:
@@ -120,6 +121,9 @@ class DCStaticSimulationCellCentered:
 
         # Store fields for each source
         fields = {}
+        # TODO: Batch solve for all sources if possible
+        # Needs to have batched implementation of matrix solver
+        # this requires implementing a custom Vmat rule for TorchMatSolver
         for src in sources:
             b = self.getRHS(src)
 

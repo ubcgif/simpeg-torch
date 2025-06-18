@@ -109,8 +109,8 @@ class BaseSrc:
         if hasattr(simulation, "_formulation") and simulation._formulation == "EB":
             # Nodal formulation: interpolate sources to nodes
             return self._evaluate_nodal(simulation)
-        elif hasattr(simulation, "bc_type") and hasattr(simulation, "getA"):
-            # Likely nodal DC simulation based on attributes
+        elif simulation.__class__.__name__ == "DCStaticSimulationNodal":
+            # Nodal simulation class
             return self._evaluate_nodal(simulation)
         else:
             # Cell-centered formulation: place sources at cell centers
