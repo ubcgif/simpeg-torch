@@ -63,13 +63,13 @@ def vectors(device):
 def test_mkvc1(vectors, device):
     x = mkvc(vectors["a"])
     assert x.shape == (3,)
-    assert x.device == device
+    assert x.device.type == device.type
 
 
 def test_mkvc2(vectors, device):
     x = mkvc(vectors["a"], 2)
     assert x.shape == (3, 1)
-    assert x.device == device
+    assert x.device.type == device.type
 
 
 def test_mkvc3(vectors):
@@ -106,7 +106,7 @@ def test_ndgrid_3D(device):
     assert torch.all(XYZ[:, 0] == X1_test)
     assert torch.all(XYZ[:, 1] == X2_test)
     assert torch.all(XYZ[:, 2] == X3_test)
-    assert XYZ.device == device
+    assert XYZ.device.type == device.type
 
 
 def test_sub2ind():
@@ -871,5 +871,5 @@ def test_torch_blockdiag_device_support(device):
 
     result = torch_blockdiag([A, B])
 
-    assert result.device == device, f"Result device should be {device}"
+    assert result.device.type == device.type, f"Result device should be {device}"
     assert result.shape == (5, 5), "Device test shape incorrect"

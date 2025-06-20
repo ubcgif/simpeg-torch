@@ -159,6 +159,8 @@ class TensorCell:
     @property
     def origin(self):
         """Coordinates of the origin of the cell."""
+        if self._origin.device.type != self.device.type:
+            self._origin.to(self.device)
         return self._origin
 
     @property

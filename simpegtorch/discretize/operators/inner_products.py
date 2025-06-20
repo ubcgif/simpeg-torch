@@ -109,7 +109,7 @@ class InnerProducts(BaseMesh):
 
         tensorType = TensorType(self, model)
 
-        Mu = make_property_tensor(self, model, sparse_type="coo")
+        Mu = make_property_tensor(self, model, sparse_type="coo", device=self.device)
         # Uses COO format for the inner product matrix as CSR does not support batch operations or additions
         # This is platform dependent, so we use COO format for consistency
         Ps = self._getInnerProductProjectionMatrices(projection_type, tensorType)
@@ -153,7 +153,7 @@ class InnerProducts(BaseMesh):
             speye(d),
             sdiag(torch.sqrt((2 ** (-d)) * self.cell_volumes)),
             sparse_type="coo",
-        )
+        ).to(self.device)
 
         nodes = ["000", "100", "010", "110", "001", "101", "011", "111"][: 2**d]
 
