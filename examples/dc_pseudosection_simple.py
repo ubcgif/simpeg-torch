@@ -166,7 +166,7 @@ try:
 
     # Run forward simulation
     print("Computing forward data...")
-    dpred = simulation.dpred(full_conductivity)
+    dpred = simulation.dpred(active_mapping * active_model)
     print(f"Predicted data shape: {dpred.shape}")
     print(f"Data range: {dpred.min():.2e} to {dpred.max():.2e} V/A")
 
@@ -249,7 +249,6 @@ try:
     ax3.set_xlabel("X (m)")
     ax3.set_ylabel("Elevation (m)")
     ax3.grid(True, alpha=0.3)
-    ax3.invert_yaxis()  # Typical convention: depth increases downward
 
     plt.tight_layout()
     plt.savefig(
