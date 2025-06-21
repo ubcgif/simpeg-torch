@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib",
     "libdlf",
     "typing_extensions; python_version<'3.13'",
+    "pytest>=8.4.1",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -71,7 +72,6 @@ docs = [
     "pillow",
     "sympy",
     "memory_profiler",
-    "python-kaleido",
 ]
 tests = [
     "simpegtorch[all,docs]",

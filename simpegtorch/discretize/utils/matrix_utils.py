@@ -176,6 +176,11 @@ def kron(A, B, sparse_type="coo"):
 
     """
 
+    # Ensure both matrices are on the same device
+    if A.device != B.device:
+        # Move B to A's device to maintain device consistency
+        B = B.to(device=A.device)
+
     # # check if A and B are coalesced
     if A.is_sparse & (not A.is_coalesced()):
         A = A.coalesce()
@@ -500,6 +505,11 @@ class SparseDiagInverse(torch.autograd.Function):
         if not M.is_sparse:
             raise TypeError("Input must be a torch sparse tensor.")
 
+        # CRITICAL: Coalesce the matrix to handle duplicate entries correctly
+        # This ensures proper behavior on CUDA where matrices may not be auto-coalesced
+        if not M.is_coalesced():
+            M = M.coalesce()
+
         indices = M._indices()
         values = M._values()
 
@@ -700,7 +710,7 @@ def ndgrid(*args, vector=True, order="F", dtype=torch.float64, device=None):
 def sub2ind(shape, subs):
     """Torch version of sub2ind using Fortran order."""
     subs = torch.as_tensor(subs, dtype=torch.long)
-    shape = torch.tensor(shape, dtype=torch.long)
+    shape = torch.as_tensor(shape, dtype=torch.long, device=subs.device)
     if subs.ndim == 1:
         subs = subs.unsqueeze(0)
     if subs.shape[1] != len(shape):
@@ -1449,7 +1459,7 @@ def make_property_tensor(
     propType = TensorType(mesh, tensor)
 
     if propType == 1:  # Isotropic
-        Sigma = kron(speye(dim), sdiag(mkvc(tensor)))
+        Sigma = kron(speye(dim, device=device, dtype=dtype), sdiag(mkvc(tensor)))
 
     elif propType == 2:  # Anisotropic
         Sigma = sdiag(mkvc(tensor))

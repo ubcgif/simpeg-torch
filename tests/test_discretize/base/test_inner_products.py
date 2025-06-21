@@ -27,19 +27,19 @@ class TestBasicInnerProducts:
         A_default = mesh.get_face_inner_product()
         assert A_default.shape == (mesh.n_faces, mesh.n_faces)
         assert A_default.is_sparse
-        assert A_default.device == device
+        assert A_default.device.type == device.type
 
         # Test with scalar model
         sigma = 2.0
         A_scalar = mesh.get_face_inner_product(sigma)
         assert A_scalar.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_scalar.device == device
+        assert A_scalar.device.type == device.type
 
         # Test with vector model
         sigma_vec = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 3.0
         A_vector = mesh.get_face_inner_product(sigma_vec)
         assert A_vector.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_vector.device == device
+        assert A_vector.device.type == device.type
 
     def test_face_inner_product_2d(self, device, dtype):
         """Test 2D face inner product with different tensor types."""
@@ -49,7 +49,7 @@ class TestBasicInnerProducts:
         sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_face_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_iso.device == device
+        assert A_iso.device.type == device.type
 
         # Anisotropic (diagonal)
         sigma_aniso = (
@@ -57,7 +57,7 @@ class TestBasicInnerProducts:
         )  # [sigma_x, sigma_y]
         A_aniso = mesh.get_face_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_aniso.device == device
+        assert A_aniso.device.type == device.type
 
         # Full tensor
         sigma_tensor = torch.ones(
@@ -65,7 +65,7 @@ class TestBasicInnerProducts:
         )  # [sigma_xx, sigma_yy, sigma_xy]
         A_tensor = mesh.get_face_inner_product(sigma_tensor)
         assert A_tensor.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_tensor.device == device
+        assert A_tensor.device.type == device.type
 
     def test_face_inner_product_3d(self, device, dtype):
         """Test 3D face inner product with different tensor types."""
@@ -75,7 +75,7 @@ class TestBasicInnerProducts:
         sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_face_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_iso.device == device
+        assert A_iso.device.type == device.type
 
         # Anisotropic (diagonal)
         sigma_aniso = (
@@ -83,7 +83,7 @@ class TestBasicInnerProducts:
         )  # [sigma_x, sigma_y, sigma_z]
         A_aniso = mesh.get_face_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_aniso.device == device
+        assert A_aniso.device.type == device.type
 
         # Full tensor
         sigma_tensor = torch.ones(
@@ -91,7 +91,7 @@ class TestBasicInnerProducts:
         )  # [sigma_xx, sigma_yy, sigma_zz, sigma_xy, sigma_xz, sigma_yz]
         A_tensor = mesh.get_face_inner_product(sigma_tensor)
         assert A_tensor.shape == (mesh.n_faces, mesh.n_faces)
-        assert A_tensor.device == device
+        assert A_tensor.device.type == device.type
 
     def test_edge_inner_product_2d(self, device, dtype):
         """Test 2D edge inner product."""
@@ -101,13 +101,13 @@ class TestBasicInnerProducts:
         sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_edge_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_iso.device == device
+        assert A_iso.device.type == device.type
 
         # Anisotropic
         sigma_aniso = torch.ones(mesh.n_cells * 2, device=device, dtype=dtype) * 2.0
         A_aniso = mesh.get_edge_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_aniso.device == device
+        assert A_aniso.device.type == device.type
 
     def test_edge_inner_product_3d(self, device, dtype):
         """Test 3D edge inner product."""
@@ -117,13 +117,13 @@ class TestBasicInnerProducts:
         sigma_iso = torch.ones(mesh.n_cells, device=device, dtype=dtype) * 2.0
         A_iso = mesh.get_edge_inner_product(sigma_iso)
         assert A_iso.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_iso.device == device
+        assert A_iso.device.type == device.type
 
         # Anisotropic
         sigma_aniso = torch.ones(mesh.n_cells * 3, device=device, dtype=dtype) * 2.0
         A_aniso = mesh.get_edge_inner_product(sigma_aniso)
         assert A_aniso.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_aniso.device == device
+        assert A_aniso.device.type == device.type
 
     def test_invert_model_flag(self, device, dtype):
         """Test the invert_model flag."""
@@ -140,8 +140,8 @@ class TestBasicInnerProducts:
         # A2 and A3 should be approximately equal
         diff = (A2 - A3).to_dense().abs().max()
         assert diff < 1e-10
-        assert A2.device == device
-        assert A3.device == device
+        assert A2.device.type == device.type
+        assert A3.device.type == device.type
 
     def test_invert_matrix_flag(self, device, dtype):
         """Test the invert_matrix flag."""
@@ -160,8 +160,8 @@ class TestBasicInnerProducts:
 
         # Diagonal should be close to 1
         assert torch.allclose(diag_vals, torch.ones_like(diag_vals), atol=1e-10)
-        assert A.device == device
-        assert A_inv.device == device
+        assert A.device.type == device.type
+        assert A_inv.device.type == device.type
 
     def test_edge_inner_product_surface_1d(self, device, dtype):
         """Test 1D edge inner product surface with isotropic model."""
@@ -171,19 +171,19 @@ class TestBasicInnerProducts:
         A_default = mesh.get_edge_inner_product_surface()
         assert A_default.shape == (mesh.n_edges, mesh.n_edges)
         assert A_default.is_sparse
-        assert A_default.device == device
+        assert A_default.device.type == device.type
 
         # Test with scalar model
         tau = 2.0
         A_scalar = mesh.get_edge_inner_product_surface(tau)
         assert A_scalar.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_scalar.device == device
+        assert A_scalar.device.type == device.type
 
         # Test with vector model
         tau_vec = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 3.0
         A_vector = mesh.get_edge_inner_product_surface(tau_vec)
         assert A_vector.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_vector.device == device
+        assert A_vector.device.type == device.type
 
     def test_edge_inner_product_surface_2d(self, device, dtype):
         """Test 2D edge inner product surface."""
@@ -192,13 +192,13 @@ class TestBasicInnerProducts:
         # Test with default model
         A_default = mesh.get_edge_inner_product_surface()
         assert A_default.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_default.device == device
+        assert A_default.device.type == device.type
 
         # Test with edge-based model
         tau = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 2.0
         A = mesh.get_edge_inner_product_surface(tau)
         assert A.shape == (mesh.n_edges, mesh.n_edges)
-        assert A.device == device
+        assert A.device.type == device.type
 
     def test_edge_inner_product_surface_3d(self, device, dtype):
         """Test 3D edge inner product surface."""
@@ -207,13 +207,13 @@ class TestBasicInnerProducts:
         # Test with default model
         A_default = mesh.get_edge_inner_product_surface()
         assert A_default.shape == (mesh.n_edges, mesh.n_edges)
-        assert A_default.device == device
+        assert A_default.device.type == device.type
 
         # Test with edge-based model
         tau = torch.ones(mesh.n_edges, device=device, dtype=dtype) * 2.0
         A = mesh.get_edge_inner_product_surface(tau)
         assert A.shape == (mesh.n_edges, mesh.n_edges)
-        assert A.device == device
+        assert A.device.type == device.type
 
     def test_edge_inner_product_surface_flags(self, device, dtype):
         """Test edge inner product surface with invert flags."""
@@ -230,8 +230,8 @@ class TestBasicInnerProducts:
         # A2 and A3 should be approximately equal
         diff = (A2 - A3).to_dense().abs().max()
         assert diff < 1e-10
-        assert A2.device == device
-        assert A3.device == device
+        assert A2.device.type == device.type
+        assert A3.device.type == device.type
 
         # With invert_matrix=True
         A_inv = mesh.get_edge_inner_product_surface(tau, invert_matrix=True)
@@ -242,8 +242,8 @@ class TestBasicInnerProducts:
 
         # Diagonal should be close to 1
         assert torch.allclose(diag_vals, torch.ones_like(diag_vals), atol=1e-10)
-        assert A.device == device
-        assert A_inv.device == device
+        assert A.device.type == device.type
+        assert A_inv.device.type == device.type
 
 
 class TestInnerProductIntegration:
@@ -382,7 +382,7 @@ class TestInnerProductProperties:
 
         # Check symmetry
         assert torch.allclose(A_dense, A_dense.T, atol=1e-12)
-        assert A.device == device
+        assert A.device.type == device.type
 
     def test_positive_definiteness(self):
         """Test that inner product matrices are positive definite."""
@@ -433,8 +433,8 @@ class TestInnerProductProjectionMatrices:
         assert P_fXp.shape == (mesh.n_cells, mesh.n_faces)
         assert P_fXm.is_sparse
         assert P_fXp.is_sparse
-        assert P_fXm.device == device
-        assert P_fXp.device == device
+        assert P_fXm.device.type == device.type
+        assert P_fXp.device.type == device.type
 
     def test_face_projection_2d(self):
         """Test 2D face projection matrices."""
@@ -520,7 +520,7 @@ class TestInnerProductDerivatives:
 
         # Verify gradient shape and properties
         assert grad_auto.shape == sigma.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
         assert not torch.isinf(grad_auto).any()
 
@@ -547,7 +547,7 @@ class TestInnerProductDerivatives:
         grad_auto = torch.autograd.grad(bilinear_form, sigma, create_graph=True)[0]
 
         assert grad_auto.shape == sigma.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
 
     def test_face_inner_product_derivative_2d_anisotropic(self, device, dtype):
@@ -572,7 +572,7 @@ class TestInnerProductDerivatives:
         grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
 
         assert grad_auto.shape == sigma.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
 
     def test_face_inner_product_derivative_3d_isotropic(self, device, dtype):
@@ -597,7 +597,7 @@ class TestInnerProductDerivatives:
         grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
 
         assert grad_auto.shape == sigma.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
 
     def test_edge_inner_product_derivative_2d(self, device, dtype):
@@ -622,7 +622,7 @@ class TestInnerProductDerivatives:
         grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
 
         assert grad_auto.shape == sigma.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
 
     def test_edge_inner_product_derivative_3d(self, device, dtype):
@@ -647,7 +647,7 @@ class TestInnerProductDerivatives:
         grad_auto = torch.autograd.grad(quadratic_form, sigma, create_graph=True)[0]
 
         assert grad_auto.shape == sigma.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
 
     def test_edge_inner_product_surface_derivative(self, device, dtype):
@@ -672,7 +672,7 @@ class TestInnerProductDerivatives:
         grad_auto = torch.autograd.grad(quadratic_form, tau, create_graph=True)[0]
 
         assert grad_auto.shape == tau.shape
-        assert grad_auto.device == device
+        assert grad_auto.device.type == device.type
         assert not torch.isnan(grad_auto).any()
 
     def test_gradient_flow_preservation(self, device, dtype):
@@ -700,7 +700,7 @@ class TestInnerProductDerivatives:
         # Gradients should be identical when computed multiple times
         assert torch.allclose(grad1, grad2, atol=1e-12)
         assert grad1.shape == sigma.shape
-        assert grad1.device == device
+        assert grad1.device.type == device.type
         assert not torch.isnan(grad1).any()
 
     def test_derivative_linearity(self, device, dtype):
@@ -737,8 +737,8 @@ class TestInnerProductDerivatives:
         assert len(grad_combined) == 2
         assert grad_combined[0].shape == sigma1.shape
         assert grad_combined[1].shape == sigma2.shape
-        assert grad_combined[0].device == device
-        assert grad_combined[1].device == device
+        assert grad_combined[0].device.type == device.type
+        assert grad_combined[1].device.type == device.type
 
     def test_derivative_with_different_vector_operations(self, device, dtype):
         """Test derivatives with different vector operations."""
@@ -770,7 +770,7 @@ class TestInnerProductDerivatives:
         for i, op in enumerate(operations):
             grad_auto = torch.autograd.grad(op, sigma, retain_graph=True)[0]
             assert grad_auto.shape == sigma.shape, f"Failed for operation {i}"
-            assert grad_auto.device == device, f"Failed for operation {i}"
+            assert grad_auto.device.type == device.type, f"Failed for operation {i}"
             assert not torch.isnan(grad_auto).any(), f"Failed for operation {i}"
 
 

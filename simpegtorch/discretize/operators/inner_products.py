@@ -150,10 +150,10 @@ class InnerProducts(BaseMesh):
         d = self.dim
         # We will multiply by sqrt on each side to keep symmetry
         V = kron(
-            speye(d),
+            speye(d, device=self.device, dtype=self.dtype),
             sdiag(torch.sqrt((2 ** (-d)) * self.cell_volumes)),
             sparse_type="coo",
-        ).to(self.device)
+        )
 
         nodes = ["000", "100", "010", "110", "001", "101", "011", "111"][: 2**d]
 

@@ -19,7 +19,14 @@ class BaseRegularMesh(BaseMesh):
         "vnC": "shape_cells",
     }
 
-    _items = {"shape_cells", "origin", "orientation", "reference_system"}
+    _items = {
+        "shape_cells",
+        "origin",
+        "orientation",
+        "reference_system",
+        "device",
+        "dtype",
+    }
 
     def __init__(
         self,
@@ -172,6 +179,14 @@ class BaseRegularMesh(BaseMesh):
 
         self._device = device
 
+        # Move origin to new device
+        if hasattr(self, "_origin") and self._origin is not None:
+            self._origin = self._origin.to(device)
+
+        # Move h tensors to new device if they exist (for tensor meshes)
+        if hasattr(self, "_h") and self._h is not None:
+            self._h = tuple(h_i.to(device) for h_i in self._h)
+
     @property
     def dtype(self):
         return self._dtype
@@ -189,6 +204,106 @@ class BaseRegularMesh(BaseMesh):
             )
 
         self._dtype = dtype
+
+    def to_dict(self):
+        """Represent the mesh's attributes as a dictionary.
+
+        Overrides base to preserve device information for tensors.
+        """
+        cls = type(self)
+        out = {
+            "__module__": cls.__module__,
+            "__class__": cls.__name__,
+        }
+        for item in self._items:
+            attr = getattr(self, item, None)
+            if attr is not None:
+                if isinstance(attr, torch.Tensor):
+                    # Store tensor data and device info
+                    out[item] = {
+                        "data": attr.tolist(),
+                        "device": str(attr.device),
+                        "dtype": str(attr.dtype),
+                    }
+                elif isinstance(attr, tuple):
+                    # Handle tuple of tensors (like h)
+                    attr_list = []
+                    for thing in attr:
+                        if isinstance(thing, torch.Tensor):
+                            attr_list.append(
+                                {
+                                    "data": thing.tolist(),
+                                    "device": str(thing.device),
+                                    "dtype": str(thing.dtype),
+                                }
+                            )
+                        else:
+                            attr_list.append(thing)
+                    out[item] = attr_list
+                elif item in {"device", "dtype"}:
+                    # Store device and dtype as strings
+                    out[item] = str(attr)
+                else:
+                    out[item] = attr
+        return out
+
+    @classmethod
+    def deserialize(cls, items, **kwargs):
+        """Create this mesh from a dictionary of attributes.
+
+        Overrides base to restore device information for tensors.
+        """
+        items = items.copy()  # Don't modify original
+        items.pop("__module__", None)
+        items.pop("__class__", None)
+
+        # Convert string device/dtype back to proper types
+        if "device" in items and isinstance(items["device"], str):
+            items["device"] = torch.device(items["device"])
+        if "dtype" in items and isinstance(items["dtype"], str):
+            dtype_str = items["dtype"]
+            if dtype_str.startswith("torch."):
+                items["dtype"] = getattr(torch, dtype_str.split(".")[-1])
+            else:
+                items["dtype"] = getattr(torch, dtype_str)
+
+        # Convert tensor data back to tensors with correct device/dtype
+        for key, value in items.items():
+            if isinstance(value, dict) and "data" in value:
+                # Single tensor
+                device = value.get("device", "cpu")
+                dtype_str = value.get("dtype", "torch.float64")
+                if dtype_str.startswith("torch."):
+                    dtype = getattr(torch, dtype_str.split(".")[-1])
+                else:
+                    dtype = getattr(torch, dtype_str)
+                items[key] = torch.tensor(value["data"], device=device, dtype=dtype)
+            elif (
+                isinstance(value, list)
+                and len(value) > 0
+                and isinstance(value[0], dict)
+                and "data" in value[0]
+            ):
+                # Tuple of tensors
+                tensor_list = []
+                for tensor_dict in value:
+                    if isinstance(tensor_dict, dict) and "data" in tensor_dict:
+                        device = tensor_dict.get("device", "cpu")
+                        dtype_str = tensor_dict.get("dtype", "torch.float64")
+                        if dtype_str.startswith("torch."):
+                            dtype = getattr(torch, dtype_str.split(".")[-1])
+                        else:
+                            dtype = getattr(torch, dtype_str)
+                        tensor_list.append(
+                            torch.tensor(
+                                tensor_dict["data"], device=device, dtype=dtype
+                            )
+                        )
+                    else:
+                        tensor_list.append(tensor_dict)
+                items[key] = tuple(tensor_list)
+
+        return cls(**items)
 
     @property
     def shape_cells(self):

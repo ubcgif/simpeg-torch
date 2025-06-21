@@ -79,7 +79,11 @@ class BaseTensorMesh(BaseRectangularMesh):
         for i, h_i in enumerate(h):
             if is_scalar(h_i) and not isinstance(h_i, torch.Tensor):
                 # This gives you something over the unit cube.
-                h_i = self._unitDimensions[i] * torch.ones(int(h_i), device=self.device) / int(h_i)
+                h_i = (
+                    self._unitDimensions[i]
+                    * torch.ones(int(h_i), device=self.device)
+                    / int(h_i)
+                )
             elif isinstance(h_i, (list, tuple)):
                 h_i = unpack_widths(h_i, dtype=self.dtype, device=self.device)
             if not isinstance(h_i, torch.Tensor):
@@ -91,11 +95,15 @@ class BaseTensorMesh(BaseRectangularMesh):
                     )
             if len(h_i.shape) != 1:
                 raise ValueError("h[{0:d}] must be a 1D array.".format(i))
-            h[i] = h_i[:]  # make a copy.
+            h[i] = h_i.to(
+                device=self.device, dtype=self.dtype
+            )  # make a copy and ensure correct device
         self._h = tuple(h)
 
         shape_cells = tuple([len(h_i) for h_i in h])
-        super().__init__(shape_cells=shape_cells)  # do not pass origin here
+        super().__init__(
+            shape_cells=shape_cells, dtype=dtype, device=device
+        )  # do not pass origin here
         if origin is not None:
             if isinstance(origin, torch.Tensor):
                 origin = origin.to(self.device)
