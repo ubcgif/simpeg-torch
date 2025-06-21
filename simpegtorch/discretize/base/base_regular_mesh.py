@@ -1,7 +1,7 @@
 import torch
 from .base_mesh import BaseMesh
 
-from ..utils import atleast_1d, Identity
+from ..utils import atleast_1d, Identity, mkvc
 
 
 class BaseRegularMesh(BaseMesh):
@@ -862,3 +862,194 @@ class BaseRectangularMesh(BaseRegularMesh):
                 torch.tensor(self.shape_faces_z, dtype=torch.int64, device=self.device)
             ).item()
         )
+
+    def reshape(
+        self,
+        x,
+        x_type="cell_centers",
+        out_type="cell_centers",
+        return_format="V",
+        **kwargs,
+    ):
+        """Reshape tensor quantities.
+
+        **Reshape** is a quick command that will do its best to reshape discrete
+        quantities living on meshes than inherit the :class:`discretize.base_mesh.RectangularMesh`
+        class. For example, you may have a 1D tensor defining a vector on mesh faces, and you would
+        like to extract the x-component and reshaped it to a 3D matrix.
+
+        Parameters
+        ----------
+        x : torch.Tensor or list of torch.Tensor
+            The input quantity, tensor or a list
+        x_type : {'CC', 'N', 'F', 'Fx', 'Fy', 'Fz', 'E', 'Ex', 'Ey', 'Ez'}
+            Defines the locations on the mesh where input parameter *x* lives.
+        out_type : str
+            Defines the output quantity. Choice depends on your input for *x_type*:
+
+            - *x_type* = 'CC' ---> *out_type* = 'CC'
+            - *x_type* = 'N' ---> *out_type* = 'N'
+            - *x_type* = 'F' ---> *out_type* = {'F', 'Fx', 'Fy', 'Fz'}
+            - *x_type* = 'E' ---> *out_type* = {'E', 'Ex', 'Ey', 'Ez'}
+        return_format : str
+            The dimensions of quantity being returned
+
+            - *V:* return a vector (1D tensor) or a list of vectors
+            - *M:* return matrix (nD tensor) or a list of matrices
+
+        """
+        if "xType" in kwargs:
+            raise TypeError(
+                "The xType keyword argument has been removed, please use x_type. "
+                "This will be removed in discretize 1.0.0"
+            )
+        if "outType" in kwargs:
+            raise TypeError(
+                "The outType keyword argument has been removed, please use out_type. "
+                "This will be removed in discretize 1.0.0",
+            )
+        if "format" in kwargs:
+            raise TypeError(
+                "The format keyword argument has been removed, please use return_format. "
+                "This will be removed in discretize 1.0.0",
+            )
+
+        x_type = self._parse_location_type(x_type)
+        out_type = self._parse_location_type(out_type)
+
+        allowed_x_type = [
+            "cell_centers",
+            "nodes",
+            "faces",
+            "faces_x",
+            "faces_y",
+            "faces_z",
+            "edges",
+            "edges_x",
+            "edges_y",
+            "edges_z",
+        ]
+        if not (isinstance(x, list) or isinstance(x, torch.Tensor)):
+            raise TypeError("x must be either a list or a torch.Tensor")
+        if x_type not in allowed_x_type:
+            raise ValueError(
+                "x_type must be either '" + "', '".join(allowed_x_type) + "'"
+            )
+        if out_type not in allowed_x_type:
+            raise ValueError(
+                "out_type must be either '" + "', '".join(allowed_x_type) + "'"
+            )
+        if return_format not in ["M", "V"]:
+            raise ValueError("return_format must be either 'M' or 'V'")
+        if out_type[: len(x_type)] != x_type:
+            raise ValueError("You cannot change types when reshaping.")
+        if x_type not in out_type:
+            raise ValueError("You cannot change type of components.")
+
+        if isinstance(x, list):
+            for i, xi in enumerate(x):
+                if not isinstance(xi, torch.Tensor):
+                    raise TypeError("x[{0:d}] must be a torch.Tensor".format(i))
+                if xi.numel() != x[0].numel():
+                    raise ValueError("Number of elements in list must not change.")
+
+            x_tensor = torch.ones(
+                (x[0].numel(), len(x)), dtype=self.dtype, device=self.device
+            )
+            # Unwrap it and put it in a tensor
+            for i, xi in enumerate(x):
+                x_tensor[:, i] = mkvc(xi)
+            x = x_tensor
+
+        if not isinstance(x, torch.Tensor):
+            raise TypeError("x must be a torch.Tensor")
+
+        x = x.clone()  # make a copy.
+        x_type_is_FE_xyz = (
+            len(x_type) > 1
+            and x_type[0] in ["f", "e"]
+            and x_type[-1] in ["x", "y", "z"]
+        )
+
+        def outKernal(xx, nn):
+            """Return xx as either a matrix (shape == nn) or a vector."""
+            if return_format == "M":
+                return xx.view(*nn)
+            elif return_format == "V":
+                return mkvc(xx)
+
+        def switchKernal(xx):
+            """Switch over the different options."""
+            if x_type in ["cell_centers", "nodes"]:
+                nn = self.shape_cells if x_type == "cell_centers" else self.shape_nodes
+                if (
+                    xx.numel()
+                    != torch.prod(torch.tensor(nn, device=self.device)).item()
+                ):
+                    raise ValueError("Number of elements must not change.")
+                return outKernal(xx, nn)
+            elif x_type in ["faces", "edges"]:
+                # This will only deal with components of fields,
+                # not full 'F' or 'E'
+                xx = mkvc(xx)  # unwrap it in case it is a matrix
+                if x_type == "faces":
+                    nn = (self.n_faces_x, self.n_faces_y, self.n_faces_z)[: self.dim]
+                else:
+                    nn = (self.n_edges_x, self.n_edges_y, self.n_edges_z)[: self.dim]
+                nn = torch.tensor([0] + list(nn), device=self.device)
+
+                nx = [None, None, None]
+                nx[0] = self.shape_faces_x if x_type == "faces" else self.shape_edges_x
+                nx[1] = self.shape_faces_y if x_type == "faces" else self.shape_edges_y
+                nx[2] = self.shape_faces_z if x_type == "faces" else self.shape_edges_z
+
+                for dim, dimName in enumerate(["x", "y", "z"]):
+                    if dimName in out_type:
+                        if self.dim <= dim:
+                            raise ValueError(
+                                "Dimensions of mesh not great enough for "
+                                "{}_{}".format(x_type, dimName)
+                            )
+                        if xx.numel() != torch.sum(nn).item():
+                            raise ValueError("Vector is not the right size.")
+                        start = torch.sum(nn[: dim + 1]).item()
+                        end = torch.sum(nn[: dim + 2]).item()
+                        return outKernal(xx[start:end], nx[dim])
+
+            elif x_type_is_FE_xyz:
+                # This will deal with partial components (x, y or z)
+                # lying on edges or faces
+                if "x" in x_type:
+                    nn = self.shape_faces_x if "f" in x_type else self.shape_edges_x
+                elif "y" in x_type:
+                    nn = self.shape_faces_y if "f" in x_type else self.shape_edges_y
+                elif "z" in x_type:
+                    nn = self.shape_faces_z if "f" in x_type else self.shape_edges_z
+                if (
+                    xx.numel()
+                    != torch.prod(torch.tensor(nn, device=self.device)).item()
+                ):
+                    raise ValueError(
+                        f"Vector is not the right size. Expected {torch.prod(torch.tensor(nn, device=self.device)).item()}, got {xx.numel()}"
+                    )
+                return outKernal(xx, nn)
+
+        # Check if we are dealing with a vector quantity
+        isVectorQuantity = len(x.shape) == 2 and x.shape[1] == self.dim
+
+        if out_type in ["faces", "edges"]:
+            if isVectorQuantity:
+                raise ValueError("Not sure what to do with a vector vector quantity..")
+            outTypeCopy = out_type
+            out = ()
+            for dirName in ["x", "y", "z"][: self.dim]:
+                out_type = outTypeCopy + "_" + dirName
+                out += (switchKernal(x),)
+            return out
+        elif isVectorQuantity:
+            out = ()
+            for ii in range(x.shape[1]):
+                out += (switchKernal(x[:, ii]),)
+            return out
+        else:
+            return switchKernal(x)

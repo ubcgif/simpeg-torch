@@ -108,6 +108,47 @@ def speye(n, dtype=torch.float64, device=None, sparse_type="coo"):
     )
 
 
+def spzeros(n1, n2, dtype=torch.float64, device=None, sparse_type="coo"):
+    """Generate sparse matrix of zeros of shape=(n1, n2).
+
+    Parameters
+    ----------
+    n1 : int
+        Number of rows.
+    n2 : int
+        Number of columns.
+    dtype : torch.dtype, optional
+        Data type of the tensor.
+    device : torch.device, optional
+        Device to store the tensor on.
+    sparse_type : {'coo', 'csr'}, optional
+        Output sparse format.
+
+    Returns
+    -------
+    torch.sparse.Tensor
+        A sparse matrix of zeros.
+    """
+    if device is None:
+        device = "cpu"
+
+    # Create empty indices and values for a sparse zero matrix
+    indices = torch.empty((2, 0), dtype=torch.long, device=device)
+    values = torch.empty(0, dtype=dtype, device=device)
+
+    if sparse_type == "coo":
+        return torch.sparse_coo_tensor(
+            indices, values, (n1, n2), dtype=dtype, device=device
+        )
+    elif sparse_type == "csr":
+        coo = torch.sparse_coo_tensor(
+            indices, values, (n1, n2), dtype=dtype, device=device
+        )
+        return coo.to_sparse_csr()
+    else:
+        raise ValueError(f"sparse_type must be 'coo' or 'csr', got {sparse_type}")
+
+
 def kron(A, B, sparse_type="coo"):
     """
 
@@ -1094,6 +1135,125 @@ def inverse_3x3_block_diagonal(
     return b11, b12, b13, b21, b22, b23, b31, b32, b33
 
 
+def torch_blockdiag(matrices, sparse_type="coo"):
+    """
+    Create a block diagonal sparse matrix from a sequence of sparse matrices using PyTorch.
+
+    This function is equivalent to scipy.sparse.block_diag but uses PyTorch sparse tensors.
+
+    Parameters
+    ----------
+    matrices : sequence of torch.sparse.Tensor
+        A sequence of sparse tensors to be arranged in block diagonal form.
+    sparse_type : {'coo', 'csr'}, optional
+        The format of the output sparse tensor. Default is 'coo'.
+
+    Returns
+    -------
+    torch.sparse.Tensor
+        A block diagonal sparse tensor where the input matrices are placed along the diagonal.
+
+    Examples
+    --------
+    >>> import torch
+    >>> from simpegtorch.discretize.utils.matrix_utils import torch_blockdiag, sdiag
+    >>>
+    >>> # Create some sample sparse matrices
+    >>> A = sdiag(torch.tensor([1., 2., 3.]))
+    >>> B = sdiag(torch.tensor([4., 5.]))
+    >>> C = sdiag(torch.tensor([6.]))
+    >>>
+    >>> # Create block diagonal matrix
+    >>> result = torch_blockdiag([A, B, C])
+    >>> print(result.shape)
+    torch.Size([6, 6])
+    """
+    if not matrices:
+        raise ValueError("Input sequence cannot be empty")
+
+    # Convert to list if it's a tuple
+    if isinstance(matrices, tuple):
+        matrices = list(matrices)
+
+    # Ensure all matrices are sparse COO tensors and get their properties
+    matrix_info = []
+    total_rows = 0
+    total_cols = 0
+
+    for mat in matrices:
+        if not (mat.is_sparse or mat.is_sparse_csr):
+            raise TypeError("All input matrices must be sparse tensors")
+
+        # Convert to COO if needed
+        if mat.is_sparse_csr:
+            mat = mat.to_sparse_coo()
+        elif not mat.layout == torch.sparse_coo:
+            raise TypeError("Unsupported sparse format")
+
+        mat = mat.coalesce()
+        matrix_info.append(mat)
+        total_rows += mat.shape[0]
+        total_cols += mat.shape[1]
+
+    # Build the block diagonal matrix
+    if len(matrix_info) == 1:
+        # Special case: single matrix
+        result = matrix_info[0]
+    else:
+        # Collect all indices and values
+        all_indices = []
+        all_values = []
+
+        row_offset = 0
+        col_offset = 0
+
+        for mat in matrix_info:
+            if mat._nnz() > 0:  # Only process if matrix has non-zero elements
+                indices = mat._indices()
+                values = mat._values()
+
+                # Offset the indices
+                offset_indices = indices.clone()
+                offset_indices[0] += row_offset  # Row indices
+                offset_indices[1] += col_offset  # Column indices
+
+                all_indices.append(offset_indices)
+                all_values.append(values)
+
+            row_offset += mat.shape[0]
+            col_offset += mat.shape[1]
+
+        if all_indices:
+            # Concatenate all indices and values
+            combined_indices = torch.cat(all_indices, dim=1)
+            combined_values = torch.cat(all_values, dim=0)
+
+            # Create the block diagonal matrix
+            result = torch.sparse_coo_tensor(
+                combined_indices,
+                combined_values,
+                (total_rows, total_cols),
+                dtype=combined_values.dtype,
+                device=combined_values.device,
+            ).coalesce()
+        else:
+            # All matrices are empty
+            device = matrix_info[0].device
+            dtype = matrix_info[0].dtype
+            result = torch.sparse_coo_tensor(
+                torch.zeros((2, 0), dtype=torch.long, device=device),
+                torch.zeros(0, dtype=dtype, device=device),
+                (total_rows, total_cols),
+                dtype=dtype,
+                device=device,
+            )
+
+    if sparse_type == "csr":
+        return result.to_sparse_csr()
+    else:
+        return result
+
+
 def inverse_property_tensor(
     mesh, tensor, return_matrix=False, dtype=torch.float64, device=None
 ):
@@ -1222,3 +1382,27 @@ def make_property_tensor(
         return Sigma.to_sparse_csr()
     else:
         return Sigma
+
+
+def cross2d(x, y):
+    """Compute the cross product of two vectors.
+
+    This function will calculate the cross product as if
+    the third component of each of these vectors was zero.
+
+    The returned direction is perpendicular to both inputs,
+    making it be solely in the third dimension.
+
+    Parameters
+    ----------
+    x, y : array_like
+        The vectors for the cross product.
+
+    Returns
+    -------
+    x_cross_y : numpy.ndarray
+        The cross product of x and y.
+    """
+    x = torch.as_tensor(x)
+    y = torch.as_tensor(y)
+    return x[..., 0] * y[..., 1] - x[..., 1] * y[..., 0]
