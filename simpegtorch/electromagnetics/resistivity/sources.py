@@ -133,6 +133,26 @@ class BaseSrc:
 
         return q
 
+    def build_receiver_tensor(self, simulation, projected_grid: str = "N"):
+        """Build a batched tensor of projection matrices for all receivers associated with this source."""
+        if self.projection_tensor is not None:
+            # cache the projection tensor if it already exists
+            return self.projection_tensor
+
+        mesh = simulation.mesh
+
+        projection_matrices = []
+
+        for rx in self.receiver_list:
+            # Get projection matrix for this receiver
+            P = rx.getP(mesh, projected_grid)
+            projection_matrices.append(P)
+        # Stack all projection matrices into a single tensor
+        projection_tensor = torch.stack(projection_matrices, dim=0)
+        # Store the projection tensor for later use
+        self.projection_tensor = projection_tensor
+        return projection_tensor
+
     def _evaluate_nodal(self, simulation):
         """Evaluate source for nodal formulation using interpolation"""
         mesh = simulation.mesh

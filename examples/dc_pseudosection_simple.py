@@ -30,7 +30,7 @@ from simpegtorch.utils import (
 
 # Set PyTorch settings
 torch.set_default_dtype(torch.float64)
-torch.set_default_device('cuda' if torch.cuda.is_available() else 'cpu')
+torch.set_default_device("cuda" if torch.cuda.is_available() else "cpu")
 print("Creating DC pseudosection example...")
 
 # =============================================================================
@@ -47,10 +47,14 @@ hy = torch.full((ny,), dy)
 hz = torch.full((nz,), dz)
 
 # Create mesh origin
-origin = torch.tensor([-nx * dx / 2, -ny * dy / 2, -250.0])  # 250m below surface
+origin = torch.tensor([-nx * dx / 2, -ny * dy / 2, -500.0])  # 500m below surface
 
 # Create the tensor mesh
-mesh = TensorMesh([hx, hy, hz], origin=origin, device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+mesh = TensorMesh(
+    [hx, hy, hz],
+    origin=origin,
+    device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+)
 print(f"Mesh: {mesh.nC} cells ({nx} x {ny} x {nz})")
 
 # =============================================================================
@@ -59,7 +63,7 @@ print(f"Mesh: {mesh.nC} cells ({nx} x {ny} x {nz})")
 
 # Create flat topography
 topo_xyz = create_flat_topography(
-    x_extent=(-500, 500),
+    x_extent=(-1000, 1000),
     y_extent=(-250, 250),
     elevation=0.0,
     n_points_x=21,
@@ -106,7 +110,7 @@ full_conductivity = active_mapping * active_conductivity
 # =============================================================================
 
 # Create a dipole-dipole survey manually for better control
-electrode_spacing = 25.0  # 25m spacing
+electrode_spacing = 50.0  # 25m spacing
 n_electrodes = 17  # 17 electrodes along line
 electrodes_x = (
     torch.arange(n_electrodes) * electrode_spacing
@@ -217,7 +221,11 @@ try:
     # Plot 2: Survey layout
     ax2 = plt.subplot(2, 2, 2)
     ax2.scatter(
-        electrode_locations[:, 0].cpu().detach(), electrode_locations[:, 1].cpu().detach(), c="red", s=30, marker="^"
+        electrode_locations[:, 0].cpu().detach(),
+        electrode_locations[:, 1].cpu().detach(),
+        c="red",
+        s=30,
+        marker="^",
     )
     ax2.set_title("Survey Layout")
     ax2.set_xlabel("X (m)")

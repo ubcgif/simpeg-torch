@@ -362,3 +362,130 @@ class Survey:
                 raise KeyError(f"Source {src} not found in survey")
 
         return indices
+
+    def get_source_tensor(self, simulation) -> torch.Tensor:
+        """Create batched source tensor for all sources in survey
+
+        Parameters
+        ----------
+        simulation : DCStaticSimulation
+            The DC resistivity simulation object
+
+        Returns
+        -------
+        torch.Tensor
+            Batched RHS tensor with shape (n_mesh_points, n_sources)
+        """
+        if not self.source_list:
+            raise ValueError("No sources defined in survey")
+
+        rhs_vectors = []
+        for src in self.source_list:
+            rhs = src.evaluate(simulation)
+            rhs_vectors.append(rhs)
+
+        # Stack along source dimension (dim=0)
+        return torch.stack(rhs_vectors, dim=0)
+
+    def get_receiver_tensor(self, mesh, projected_grid: str = "N") -> torch.Tensor:
+        """Create batched receiver projection tensor for all receivers
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        projected_grid : str, default: "N"
+            Grid locations to project from ("N" for nodes, "CC" for cell centers)
+
+        Returns
+        -------
+        torch.Tensor
+            Batched projection tensor with shape (n_data_total, n_mesh_points)
+            Each row corresponds to one data point's projection from mesh to receiver
+        """
+        if not self.source_list:
+            raise ValueError("No sources defined in survey")
+
+        projection_matrices = []
+
+        for src in self.source_list:
+            reciever_tensor = src.build_receiver_tensor(mesh, projected_grid)
+            projection_matrices.append(reciever_tensor)
+
+        return projection_matrices
+
+    def get_receiver_tensor_sparse_list(self, mesh, projected_grid: str = "N"):
+        """Get receiver projection matrices as a sparse list (most memory efficient)
+
+        This method returns the receiver projection matrices as a list of sparse
+        tensors without any stacking or padding. This is the most memory-efficient
+        approach for batched operations.
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        projected_grid : str, default: "N"
+            Grid locations to project from
+
+        Returns
+        -------
+        list of torch.sparse.Tensor
+            List of sparse projection matrices, one for each receiver
+        """
+        if not self.source_list:
+            raise ValueError("No sources defined in survey")
+
+        sparse_matrices = []
+        for src in self.source_list:
+            for rx in src.receiver_list:
+                P = rx.getP(mesh, projected_grid)
+                sparse_matrices.append(P)
+
+        return sparse_matrices
+
+    def get_mesh_size_for_grid(self, mesh, projected_grid: str) -> int:
+        """Get the number of mesh points for a given projection grid
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        projected_grid : str
+            Grid type ("N", "CC", "Ex", "Ey", "Ez", "Fx", "Fy", "Fz")
+
+        Returns
+        -------
+        int
+            Number of mesh points for the specified grid
+        """
+        grid_map = {
+            "N": mesh.nN,
+            "nodes": mesh.nN,
+            "CC": mesh.nC,
+            "cell_centers": mesh.nC,
+        }
+
+        if projected_grid in grid_map:
+            return grid_map[projected_grid]
+        elif projected_grid.startswith("E"):  # Edge grids
+            if projected_grid in ["Ex", "edges_x"]:
+                return mesh.nEx
+            elif projected_grid in ["Ey", "edges_y"]:
+                return mesh.nEy
+            elif projected_grid in ["Ez", "edges_z"]:
+                return mesh.nEz
+            else:
+                return mesh.nE  # Total edges
+        elif projected_grid.startswith("F"):  # Face grids
+            if projected_grid in ["Fx", "faces_x"]:
+                return mesh.nFx
+            elif projected_grid in ["Fy", "faces_y"]:
+                return mesh.nFy
+            elif projected_grid in ["Fz", "faces_z"]:
+                return mesh.nFz
+            else:
+                return mesh.nF  # Total faces
+        else:
+            # Default fallback
+            return mesh.nC
