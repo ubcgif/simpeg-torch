@@ -32,6 +32,7 @@ class BaseSrc:
             self.location = location
         self.current = current
         self._uid = uuid.uuid4()
+        self.projection_tensor = None
 
     @property
     def location(self) -> torch.Tensor:
@@ -133,13 +134,17 @@ class BaseSrc:
 
         return q
 
-    def build_receiver_tensor(self, simulation, projected_grid: str = "N"):
+    def build_receiver_tensor(self, mesh, projected_grid: str = "N"):
         """Build a batched tensor of projection matrices for all receivers associated with this source."""
-        if self.projection_tensor is not None:
-            # cache the projection tensor if it already exists
-            return self.projection_tensor
+        # Create cache key that includes the projected_grid parameter
+        cache_key = f"{id(mesh)}_{projected_grid}"
 
-        mesh = simulation.mesh
+        # Check if we have a cached tensor for this mesh and grid combination
+        if (
+            hasattr(self, "_projection_tensor_cache")
+            and cache_key in self._projection_tensor_cache
+        ):
+            return self._projection_tensor_cache[cache_key]
 
         projection_matrices = []
 
@@ -149,8 +154,12 @@ class BaseSrc:
             projection_matrices.append(P)
         # Stack all projection matrices into a single tensor
         projection_tensor = torch.stack(projection_matrices, dim=0)
-        # Store the projection tensor for later use
-        self.projection_tensor = projection_tensor
+
+        # Cache the projection tensor with the proper key
+        if not hasattr(self, "_projection_tensor_cache"):
+            self._projection_tensor_cache = {}
+        self._projection_tensor_cache[cache_key] = projection_tensor
+
         return projection_tensor
 
     def _evaluate_nodal(self, simulation):

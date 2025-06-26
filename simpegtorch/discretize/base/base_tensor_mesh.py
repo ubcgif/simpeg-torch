@@ -171,8 +171,6 @@ class BaseTensorMesh(BaseRectangularMesh):
             the x-direction.
 
         """
-        print(f"Origin: {self.origin}")
-        print(f"H: {self.h}")
         return torch.cat([self.origin[0].unsqueeze(0), self.h[0]]).cumsum(0)
 
     @property

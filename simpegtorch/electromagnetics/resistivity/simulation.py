@@ -121,16 +121,16 @@ class DCStaticSimulationCellCentered:
 
         # Store fields for each source
         fields = {}
-        # TODO: Batch solve for all sources if possible
-        # Needs to have batched implementation of matrix solver
-        # this requires implementing a custom Vmat rule for TorchMatSolver
-        for src in sources:
-            b = self.getRHS(src)
 
-            def solve_fn(A, b):
-                return sparse.linalg.spsolve(A, b)
+        b_tensor = self.survey.get_source_tensor(self)  # Cell-centered formulation
+        field_tensor = torch.vmap(
+            TorchMatSolver.apply,
+            in_dims=(None, 0, None),
+        )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
 
-            fields[src] = TorchMatSolver.apply(A, b, solve_fn)
+        for i, src in enumerate(sources):
+            # Store field for each source
+            fields[src] = field_tensor[i]
 
         return fields
 
@@ -170,11 +170,38 @@ class DCStaticSimulationCellCentered:
                 # Single field (for single source case)
                 src_field = f
 
-            for rx in src.receiver_list:
-                n_rx_data = rx.nD
-                rx_data = rx.evaluate(src, self.mesh, src_field)
-                data[data_idx : data_idx + n_rx_data] = rx_data
-                data_idx += n_rx_data
+            # Create batched tensor of all receiver data
+            rx_tensor = src.build_receiver_tensor(
+                self.mesh, "CC"
+            )  # Cell-centered formulation
+
+            # rx_tensor shape: [n_rx, 1, n_cells], src_field shape: [n_cells]
+            # Need src_field_b shape: [n_rx, n_cells, 1] for bmm
+            src_field_b = (
+                src_field.unsqueeze(-1).unsqueeze(0).repeat(rx_tensor.shape[0], 1, 1)
+            )
+            rx_data = torch.bmm(rx_tensor, src_field_b)
+            rx_data = rx_data.flatten(start_dim=0, end_dim=-1)
+
+            if src.receiver_list[0].data_type == "apparent_resistivity":
+                # Apply geometric factors properly to each receiver's data slice
+                rx_data_idx = 0
+                for rx in src.receiver_list:
+                    if src.uid in rx.geometric_factor:
+                        geometric_factor = rx.geometric_factor[src.uid]
+                        # Slice rx_data for this receiver's data points
+                        rx_slice = slice(rx_data_idx, rx_data_idx + rx.nD)
+                        rx_data[rx_slice] = rx_data[rx_slice] / geometric_factor
+                        rx_data_idx += rx.nD
+                    else:
+                        raise KeyError(
+                            "Geometric factor not set for apparent resistivity. "
+                            "Call survey.set_geometric_factor() first."
+                        )
+
+            # Store data for each receiver
+            data[data_idx : data_idx + rx_data.shape[0]] = rx_data
+            data_idx += rx_data.shape[0]
 
         return data
 
@@ -440,6 +467,29 @@ class DCStaticSimulationNodal:
             return b_modified
         return b
 
+    def _apply_neumann_bc_to_rhs_tensor(self, b_tensor):
+        """
+        Apply Neumann boundary condition modification to RHS tensor.
+
+        For Neumann BCs, we fix the potential at the first node to zero,
+        so we modify the RHS accordingly.
+
+        Parameters
+        ----------
+        b_tensor : torch.Tensor
+            Right-hand side tensor
+
+        Returns
+        -------
+        torch.Tensor
+            Modified RHS tensor for Neumann BCs
+        """
+        if self.bc_type.lower() == "neumann":
+            b_tensor_modified = b_tensor.clone()
+            b_tensor_modified[:, 0] = 0.0
+            return b_tensor_modified
+        return b_tensor
+
     def fields(self, resistivity, source: Optional[BaseSrc] = None):
         """
         Computes the electric potentials for the nodal DC resistivity problem.
@@ -471,14 +521,18 @@ class DCStaticSimulationNodal:
 
         # Store fields for each source
         fields = {}
-        for src in sources:
-            b = self.getRHS(src)
-            b = self._apply_neumann_bc_to_rhs(b)
 
-            def solve_fn(A, b):
-                return sparse.linalg.spsolve(A, b)
+        b_tensor = self.survey.get_source_tensor(self)  # Cell-centered formulation
+        b_tensor = self._apply_neumann_bc_to_rhs_tensor(b_tensor)
 
-            fields[src] = TorchMatSolver.apply(A, b, solve_fn)
+        field_tensor = torch.vmap(
+            TorchMatSolver.apply,
+            in_dims=(None, 0, None),
+        )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
+
+        for i, src in enumerate(sources):
+            # Store field for each source
+            fields[src] = field_tensor[i]
 
         return fields
 
@@ -518,11 +572,37 @@ class DCStaticSimulationNodal:
                 # Single field (for single source case)
                 src_field = f
 
-            for rx in src.receiver_list:
-                n_rx_data = rx.nD
-                rx_data = rx.evaluate(src, self.mesh, src_field)
-                data[data_idx : data_idx + n_rx_data] = rx_data
-                data_idx += n_rx_data
+            # Create batched tensor of all receiver data
+            rx_tensor = src.build_receiver_tensor(self.mesh, "N")  # Nodal formulation
+
+            # project src field to receiver data, rx_tensor is (n_rx, 1, n_cells),
+            # src field should be (n_rx, n_cells, 1)
+            src_field_b = (
+                src_field.unsqueeze(1).unsqueeze(0).repeat(rx_tensor.shape[0], 1, 1)
+            )
+            # rx_data = rx_tensor @ src_field
+            rx_data = torch.bmm(rx_tensor, src_field_b)
+            rx_data = rx_data.flatten(start_dim=0, end_dim=-1)
+
+            if src.receiver_list[0].data_type == "apparent_resistivity":
+                # Apply geometric factors properly to each receiver's data slice
+                rx_data_idx = 0
+                for rx in src.receiver_list:
+                    if src.uid in rx.geometric_factor:
+                        geometric_factor = rx.geometric_factor[src.uid]
+                        # Slice rx_data for this receiver's data points
+                        rx_slice = slice(rx_data_idx, rx_data_idx + rx.nD)
+                        rx_data[rx_slice] = rx_data[rx_slice] / geometric_factor
+                        rx_data_idx += rx.nD
+                    else:
+                        raise KeyError(
+                            "Geometric factor not set for apparent resistivity. "
+                            "Call survey.set_geometric_factor() first."
+                        )
+
+            # Store data for each receiver
+            data[data_idx : data_idx + rx_data.shape[0]] = rx_data
+            data_idx += rx_data.shape[0]
 
         return data
 
