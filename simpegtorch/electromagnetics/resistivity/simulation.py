@@ -13,10 +13,13 @@ class DCStaticSimulationCellCentered:
         mesh: TensorMesh,
         survey=None,
         bc_type: str = "Dirichlet",
+        sigma=None,
+        **kwargs,
     ):
         self.mesh = mesh
         self.survey = survey
         self.bc_type = bc_type
+        self.sigma = sigma
         self.setBC()
 
     @property
@@ -37,32 +40,79 @@ class DCStaticSimulationCellCentered:
 
     def setBC(self):
         mesh = self.mesh
+        # Standard cell-centered finite volume discretization
+        # Volume scaling is needed for proper conservation
         V = sdiag(mesh.cell_volumes)
         self.Div = V @ mesh.face_divergence
         self.Grad = self.Div.T
+
         if self.bc_type == "Dirichlet":
             print("Homogeneous Dirichlet is the natural BC for this CC discretization")
             return
         elif self.bc_type.lower() == "neumann":
             alpha, beta, gamma = 0, 1, 0
+            B, _ = mesh.cell_gradient_weak_form_robin(alpha, beta, gamma)
+            self.Grad = self.Grad - B
         else:
             raise ValueError(f"Unsupported boundary condition type: {self.bc_type}")
             # TODO: Implement Robin and mixed boundary conditions
 
-        B, _ = mesh.cell_gradient_weak_form_robin(alpha, beta, gamma)
-        self.Grad = self.Grad - B
-
     def getA(self, resistivity):
         """
         Returns the system matrix A for the DC resistivity problem.
-        If resitivity is provided, it computes the matrix based on the given resistivity values.
+        If resistivity is provided, it computes the matrix based on the given resistivity values.
         """
         D = self.Div
         G = self.Grad
 
+        # Use face inner product with inverse resistivity (conductivity)
         MfRhoI = self.mesh.get_face_inner_product(resistivity, invert_matrix=True)
 
         A = D @ MfRhoI @ G
+
+        if self.bc_type.lower() == "neumann":
+            # Handle null space by fixing the potential at the first node to zero
+            # This approach modifies the sparse matrix efficiently without converting to dense
+
+            # Get the COO format indices and values
+            indices = A.indices()
+            values = A.values()
+
+            # Find entries in the first row (row index 0)
+            first_row_mask = indices[0, :] == 0
+
+            # Zero out values in the first row (except diagonal)
+            values_modified = values.clone()
+            values_modified[first_row_mask & (indices[1, :] != 0)] = 0.0
+
+            # Set diagonal element to 1
+            diagonal_mask = first_row_mask & (indices[1, :] == 0)
+            if torch.any(diagonal_mask):
+                values_modified[diagonal_mask] = 1.0
+            else:
+                # Add diagonal element if it doesn't exist
+                new_indices = torch.cat(
+                    [
+                        indices,
+                        torch.tensor(
+                            [[0], [0]], dtype=indices.dtype, device=indices.device
+                        ),
+                    ],
+                    dim=1,
+                )
+                new_values = torch.cat(
+                    [
+                        values_modified,
+                        torch.tensor([1.0], dtype=values.dtype, device=values.device),
+                    ]
+                )
+                A_modified = torch.sparse_coo_tensor(new_indices, new_values, A.shape)
+                return A_modified.coalesce()
+
+            # Create modified sparse matrix
+            A_modified = torch.sparse_coo_tensor(indices, values_modified, A.shape)
+            return A_modified.coalesce()
+
         return A
 
     def getRHS(self, source: Optional[BaseSrc] = None):
@@ -91,17 +141,28 @@ class DCStaticSimulationCellCentered:
 
         return b
 
-    def fields(self, resistivity, source: Optional[BaseSrc] = None):
+    def fields(self, resistivity=None, source: Optional[BaseSrc] = None):
         """
         Computes the electric fields for the DC resistivity problem.
 
         Parameters
         ----------
-        resistivity : torch.Tensor
-            Resistivity model values
+        resistivity : torch.Tensor, optional
+            Resistivity model values. If None, uses stored sigma converted to resistivity.
         source : BaseSrc, optional
             Specific source to solve for. If None, solves for all sources.
         """
+        # Use stored sigma if resistivity not provided
+        if resistivity is None:
+            if self.sigma is None:
+                raise ValueError(
+                    "Either provide resistivity or set sigma in constructor"
+                )
+            # Convert conductivity to resistivity
+            if isinstance(self.sigma, torch.Tensor):
+                resistivity = 1.0 / self.sigma
+            else:
+                resistivity = 1.0 / torch.tensor(self.sigma, dtype=torch.float64)
         A = self.getA(resistivity)
 
         if source is not None:
@@ -316,10 +377,13 @@ class DCStaticSimulationNodal:
         mesh: TensorMesh,
         survey=None,
         bc_type: str = "Neumann",
+        sigma=None,
+        **kwargs,
     ):
         self.mesh = mesh
         self.survey = survey
         self.bc_type = bc_type
+        self.sigma = sigma
         self.setBC()
 
     @property
@@ -490,17 +554,28 @@ class DCStaticSimulationNodal:
             return b_tensor_modified
         return b_tensor
 
-    def fields(self, resistivity, source: Optional[BaseSrc] = None):
+    def fields(self, resistivity=None, source: Optional[BaseSrc] = None):
         """
         Computes the electric potentials for the nodal DC resistivity problem.
 
         Parameters
         ----------
-        resistivity : torch.Tensor
-            Resistivity model values
+        resistivity : torch.Tensor, optional
+            Resistivity model values. If None, uses stored sigma converted to resistivity.
         source : BaseSrc, optional
             Specific source to solve for. If None, solves for all sources.
         """
+        # Use stored sigma if resistivity not provided
+        if resistivity is None:
+            if self.sigma is None:
+                raise ValueError(
+                    "Either provide resistivity or set sigma in constructor"
+                )
+            # Convert conductivity to resistivity
+            if isinstance(self.sigma, torch.Tensor):
+                resistivity = 1.0 / self.sigma
+            else:
+                resistivity = 1.0 / torch.tensor(self.sigma, dtype=torch.float64)
         A = self.getA(resistivity)
 
         if source is not None:

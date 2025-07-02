@@ -32,7 +32,9 @@ from .survey import Survey
 # Main simulation class
 Simulation = DCStaticSimulationCellCentered
 
-# Aliases for common usage patterns
+# Aliases for common usage patterns and backward compatibility
+Simulation3DCellCentered = DCStaticSimulationCellCentered
+Simulation3DNodal = DCStaticSimulationNodal
 Src = BaseSrc
 Rx = BaseRx
 
@@ -41,6 +43,8 @@ __all__ = [
     "Simulation",
     "DCStaticSimulationCellCentered",
     "DCStaticSimulationNodal",
+    "Simulation3DCellCentered",
+    "Simulation3DNodal",
     # Sources
     "BaseSrc",
     "Src",

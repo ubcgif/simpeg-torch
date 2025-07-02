@@ -46,13 +46,31 @@ class BaseSrc:
         return self._location
 
     @location.setter
-    def location(self, loc: Union[torch.Tensor, np.ndarray]):
+    def location(self, loc: Union[torch.Tensor, np.ndarray, list]):
         if isinstance(loc, np.ndarray):
             loc = torch.from_numpy(loc).float()
+        elif isinstance(loc, list):
+            # Handle list of locations (for multipole sources)
+            tensor_locs = []
+            for l in loc:
+                if isinstance(l, torch.Tensor):
+                    tensor_locs.append(l.to(torch.float64))
+                elif isinstance(l, np.ndarray):
+                    tensor_locs.append(torch.from_numpy(l).to(torch.float64))
+                else:
+                    tensor_locs.append(torch.tensor(l, dtype=torch.float64))
+
+            # Ensure each location has proper dimensions
+            for i, t_loc in enumerate(tensor_locs):
+                if t_loc.dim() == 1:
+                    tensor_locs[i] = t_loc.unsqueeze(0)
+
+            # Stack all locations into a single tensor
+            loc = torch.cat(tensor_locs, dim=0)
         elif not isinstance(loc, torch.Tensor):
             loc = torch.tensor(loc, dtype=torch.float64)
 
-        if loc.dim() == 1:
+        if isinstance(loc, torch.Tensor) and loc.dim() == 1:
             loc = loc.unsqueeze(0)  # Add batch dimension for single electrode
 
         self._location = loc

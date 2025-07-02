@@ -129,32 +129,6 @@ def test_gradient_computation_A(simple_system):
     assert torch.all(torch.isfinite(A_torch.grad.to_dense()))
 
 
-def test_gradient_symmetry():
-    """Test that gradients maintain symmetry for symmetric matrices"""
-    # Create a simple symmetric sparse matrix
-    indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
-    values = torch.tensor([4.0, 1.0, 1.0, 3.0], requires_grad=True)
-    A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
-    A.retain_grad()
-
-    b = torch.tensor([1.0, 1.0], requires_grad=True)
-
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
-    # Solve and compute gradients
-    x = TorchMatSolver.apply(A, b, solve_fn)
-    loss = torch.sum(x**2)
-    loss.backward()
-
-    # Check that gradient is symmetric
-    grad_dense = A.grad.to_dense()
-    assert torch.allclose(grad_dense, grad_dense.T, atol=1e-10)
-
-    # Check that gradients are finite
-    assert torch.all(torch.isfinite(grad_dense))
-
-
 def test_device_consistency():
     """Test that output tensors maintain device consistency with sparse matrices"""
     # Create sparse tensor directly
@@ -298,3 +272,44 @@ def test_large_sparse_matrix_efficiency():
     print(f"Large matrix test: {n}x{n} matrix with {A_nnz} non-zeros")
     print(f"Gradient has {grad_nnz} non-zeros")
     print("Memory-efficient gradient computation successful!")
+
+
+def test_gradient_correctness_A(simple_system):
+    """Test gradient correctness w.r.t A using finite differences"""
+    A_torch, b_torch, A_sparse, b_np = simple_system
+
+    def solve_fn(A, b):
+        return sparse.linalg.spsolve(A, b)
+
+    # Compute loss and gradients
+    A_torch.retain_grad()
+    x = TorchMatSolver.apply(A_torch, b_torch, solve_fn)
+    loss = torch.sum(x**2)
+    loss.backward()
+
+    # Finite difference check
+    eps = 1e-7
+    A_values = A_torch.coalesce().values()
+    A_indices = A_torch.coalesce().indices()
+    grad_values = A_torch.grad.coalesce().values()
+
+    # Test a few values
+    for i in range(min(3, len(A_values))):
+        # Perturb value
+        values_plus = A_values.clone().detach()
+        values_plus[i] += eps
+        A_plus = torch.sparse_coo_tensor(A_indices, values_plus, A_torch.shape)
+        x_plus = TorchMatSolver.apply(A_plus, b_torch.detach(), solve_fn)
+        loss_plus = torch.sum(x_plus**2)
+
+        values_minus = A_values.clone().detach()
+        values_minus[i] -= eps
+        A_minus = torch.sparse_coo_tensor(A_indices, values_minus, A_torch.shape)
+        x_minus = TorchMatSolver.apply(A_minus, b_torch.detach(), solve_fn)
+        loss_minus = torch.sum(x_minus**2)
+
+        grad_fd = (loss_plus - loss_minus) / (2 * eps)
+
+        # Compare
+        rel_error = abs(grad_values[i] - grad_fd) / (abs(grad_values[i]) + 1e-10)
+        assert rel_error < 1e-4, f"Gradient mismatch at index {i}: {rel_error:.2e}"
