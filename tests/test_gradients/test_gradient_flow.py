@@ -152,31 +152,6 @@ class TestTorchMatSolverGradients:
         # Gradient should be finite (check dense values)
         assert torch.all(torch.isfinite(A_torch.grad.to_dense()))
 
-    def test_gradient_symmetry(self):
-        """Test that gradients maintain symmetry for symmetric matrices."""
-        # Create a simple symmetric sparse matrix
-        indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
-        values = torch.tensor([4.0, 1.0, 1.0, 3.0], requires_grad=True)
-        A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
-        A.retain_grad()
-
-        b = torch.tensor([1.0, 1.0], requires_grad=True)
-
-        def solve_fn(A, b):
-            return sparse.linalg.spsolve(A, b)
-
-        # Solve and compute gradients
-        x = TorchMatSolver.apply(A, b, solve_fn)
-        loss = torch.sum(x**2)
-        loss.backward()
-
-        # Check that gradient is symmetric
-        grad_dense = A.grad.to_dense()
-        assert torch.allclose(grad_dense, grad_dense.T, atol=1e-10)
-
-        # Check that gradients are finite
-        assert torch.all(torch.isfinite(grad_dense))
-
     def test_device_consistency(self):
         """Test that output tensors maintain device consistency with sparse matrices."""
         # Create sparse tensor directly

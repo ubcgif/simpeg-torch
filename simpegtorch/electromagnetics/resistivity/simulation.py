@@ -46,6 +46,9 @@ class DCStaticSimulationCellCentered:
         self.Div = V @ mesh.face_divergence
         self.Grad = self.Div.T
 
+        # Initialize MfRhoI here, it will be updated in getA
+        self.MfRhoI = None
+
         if self.bc_type == "Dirichlet":
             print("Homogeneous Dirichlet is the natural BC for this CC discretization")
             return
@@ -66,52 +69,40 @@ class DCStaticSimulationCellCentered:
         G = self.Grad
 
         # Use face inner product with inverse resistivity (conductivity)
-        MfRhoI = self.mesh.get_face_inner_product(resistivity, invert_matrix=True)
+        self.MfRhoI = self.mesh.get_face_inner_product(resistivity, invert_matrix=True)
 
-        A = D @ MfRhoI @ G
+        A = D @ self.MfRhoI @ G
 
         if self.bc_type.lower() == "neumann":
-            # Handle null space by fixing the potential at the first node to zero
-            # This approach modifies the sparse matrix efficiently without converting to dense
+            # Get the shape of A
+            n_rows, n_cols = A.shape
 
-            # Get the COO format indices and values
-            indices = A.indices()
-            values = A.values()
+            # Create a sparse tensor that represents the modification
+            # It will have 1 at (0,0) and 0 elsewhere
+            mod_indices = torch.tensor([[0], [0]], dtype=torch.long, device=A.device)
+            mod_values = torch.tensor([1.0], dtype=A.dtype, device=A.device)
+            modification_matrix = torch.sparse_coo_tensor(
+                mod_indices, mod_values, A.shape
+            ).coalesce()
 
-            # Find entries in the first row (row index 0)
-            first_row_mask = indices[0, :] == 0
+            # Create a mask for the first row of A
+            first_row_mask = A.indices()[0] == 0
 
-            # Zero out values in the first row (except diagonal)
-            values_modified = values.clone()
-            values_modified[first_row_mask & (indices[1, :] != 0)] = 0.0
+            # Get the values of the first row of A
+            first_row_values = A.values()[first_row_mask]
+            first_row_cols = A.indices()[1, first_row_mask]
 
-            # Set diagonal element to 1
-            diagonal_mask = first_row_mask & (indices[1, :] == 0)
-            if torch.any(diagonal_mask):
-                values_modified[diagonal_mask] = 1.0
-            else:
-                # Add diagonal element if it doesn't exist
-                new_indices = torch.cat(
-                    [
-                        indices,
-                        torch.tensor(
-                            [[0], [0]], dtype=indices.dtype, device=indices.device
-                        ),
-                    ],
-                    dim=1,
-                )
-                new_values = torch.cat(
-                    [
-                        values_modified,
-                        torch.tensor([1.0], dtype=values.dtype, device=values.device),
-                    ]
-                )
-                A_modified = torch.sparse_coo_tensor(new_indices, new_values, A.shape)
-                return A_modified.coalesce()
+            # Create a sparse tensor representing the negative of the first row of A
+            neg_first_row_indices = torch.stack(
+                [torch.zeros_like(first_row_cols), first_row_cols]
+            )
+            neg_first_row_values = -first_row_values
+            neg_first_row_matrix = torch.sparse_coo_tensor(
+                neg_first_row_indices, neg_first_row_values, A.shape
+            ).coalesce()
 
-            # Create modified sparse matrix
-            A_modified = torch.sparse_coo_tensor(indices, values_modified, A.shape)
-            return A_modified.coalesce()
+            # Add the modification matrix and the negative of the first row to A
+            A = A + neg_first_row_matrix + modification_matrix
 
         return A
 
@@ -464,47 +455,35 @@ class DCStaticSimulationNodal:
         A = Grad.T @ MeSigma @ Grad
 
         if self.bc_type.lower() == "neumann":
-            # Handle null space by fixing the potential at the first node to zero
-            # This approach modifies the sparse matrix efficiently without converting to dense
+            # Get the shape of A
+            n_rows, n_cols = A.shape
 
-            # Get the COO format indices and values
-            indices = A.indices()
-            values = A.values()
+            # Create a sparse tensor that represents the modification
+            # It will have 1 at (0,0) and 0 elsewhere
+            mod_indices = torch.tensor([[0], [0]], dtype=torch.long, device=A.device)
+            mod_values = torch.tensor([1.0], dtype=A.dtype, device=A.device)
+            modification_matrix = torch.sparse_coo_tensor(
+                mod_indices, mod_values, A.shape
+            ).coalesce()
 
-            # Find entries in the first row (row index 0)
-            first_row_mask = indices[0, :] == 0
+            # Create a mask for the first row of A
+            first_row_mask = A.indices()[0] == 0
 
-            # Zero out values in the first row (except diagonal)
-            values_modified = values.clone()
-            values_modified[first_row_mask & (indices[1, :] != 0)] = 0.0
+            # Get the values of the first row of A
+            first_row_values = A.values()[first_row_mask]
+            first_row_cols = A.indices()[1, first_row_mask]
 
-            # Set diagonal element to 1
-            diagonal_mask = first_row_mask & (indices[1, :] == 0)
-            if torch.any(diagonal_mask):
-                values_modified[diagonal_mask] = 1.0
-            else:
-                # Add diagonal element if it doesn't exist
-                new_indices = torch.cat(
-                    [
-                        indices,
-                        torch.tensor(
-                            [[0], [0]], dtype=indices.dtype, device=indices.device
-                        ),
-                    ],
-                    dim=1,
-                )
-                new_values = torch.cat(
-                    [
-                        values_modified,
-                        torch.tensor([1.0], dtype=values.dtype, device=values.device),
-                    ]
-                )
-                A_modified = torch.sparse_coo_tensor(new_indices, new_values, A.shape)
-                return A_modified.coalesce()
+            # Create a sparse tensor representing the negative of the first row of A
+            neg_first_row_indices = torch.stack(
+                [torch.zeros_like(first_row_cols), first_row_cols]
+            )
+            neg_first_row_values = -first_row_values
+            neg_first_row_matrix = torch.sparse_coo_tensor(
+                neg_first_row_indices, neg_first_row_values, A.shape
+            ).coalesce()
 
-            # Create modified sparse matrix
-            A_modified = torch.sparse_coo_tensor(indices, values_modified, A.shape)
-            return A_modified.coalesce()
+            # Add the modification matrix and the negative of the first row to A
+            A = A + neg_first_row_matrix + modification_matrix
 
         return A
 

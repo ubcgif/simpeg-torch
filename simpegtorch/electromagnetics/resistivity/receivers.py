@@ -179,12 +179,8 @@ class BaseRx:
         torch.Tensor
             Data extracted at receiver locations
         """
-        # Determine projected grid based on simulation formulation
-        # Check if we can detect nodal formulation from field size
-        if f.numel() == mesh.nN:
-            # Fields are on nodes - this is nodal formulation
-            projected_grid = "N"
-        elif self.orientation is not None:
+
+        if self.orientation is not None:
             projected_grid = f"edges_{self.orientation}"
         else:
             projected_grid = "CC" if self.projField == "phi" else self.projField

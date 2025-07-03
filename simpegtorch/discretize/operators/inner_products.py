@@ -114,10 +114,10 @@ class InnerProducts(BaseMesh):
         # This is platform dependent, so we use COO format for consistency
         Ps = self._getInnerProductProjectionMatrices(projection_type, tensorType)
         # Manually sum sparse tensors since torch.sum doesn't work on lists of sparse tensors
-        terms = [torch.sparse.mm(torch.sparse.mm(P.T, Mu), P) for P in Ps]
-        A = terms[0]
-        for term in terms[1:]:
-            A = A + term
+        A_stack = [torch.sparse.mm(torch.sparse.mm(P.T, Mu), P) for P in Ps]
+        A = A_stack[0]
+        for As in A_stack[1:]:
+            A += As
 
         if invert_matrix and tensorType < 3:
             A = sdinv(A)

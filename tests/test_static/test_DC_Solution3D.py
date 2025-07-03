@@ -1,7 +1,9 @@
 import torch
+from simpegtorch.torchmatsolver.utils import torch_tensor_to_sp
+import scipy.sparse as sparse
+import unittest
 
 from simpegtorch.discretize import TensorMesh
-import unittest
 from simpegtorch.electromagnetics.resistivity import (
     DCStaticSimulationNodal,
     DCStaticSimulationCellCentered,
@@ -233,3 +235,252 @@ class DCSolutionTest(unittest.TestCase):
             rtol=tolerance,
             err_msg="Cell-centered individual data values differ beyond tolerance",
         )
+
+    def test_compare_A_matrices(self, tolerance=1e-8):
+        self.setUp()
+        simulation_torch = DCStaticSimulationCellCentered(
+            self.mesh_torch,
+            survey=self.survey_torch,
+            sigma=self.sigma,
+            bc_type="Dirichlet",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DCellCentered(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Dirichlet",
+        )
+
+        resistivity_model = 1.0 / self.sigma
+
+        D_torch = simulation_torch.Div
+        G_torch = simulation_torch.Grad
+        MfRhoI_torch = simulation_torch.mesh.get_face_inner_product(
+            resistivity_model, invert_matrix=True
+        )
+
+        D_orig = simulation_orig.Div
+        G_orig = simulation_orig.Grad
+        MfRhoI_orig = simulation_orig.mesh.get_face_inner_product(
+            1.0 / self.sigma.numpy(), invert_matrix=True
+        )
+
+        print(f"\nTorch D: {D_torch.dtype}, {D_torch.shape}")
+        print(f"Orig D: {D_orig.dtype}, {D_orig.shape}")
+        print(f"Torch G: {G_torch.dtype}, {G_torch.shape}")
+        print(f"Orig G: {G_orig.dtype}, {G_orig.shape}")
+        print(f"Torch MfRhoI: {MfRhoI_torch.dtype}, {MfRhoI_torch.shape}")
+        print(f"Orig MfRhoI: {MfRhoI_orig.dtype}, {MfRhoI_orig.shape}")
+
+        A_torch = D_torch @ MfRhoI_torch @ G_torch
+        A_orig = D_orig @ MfRhoI_orig @ G_orig
+
+        A_torch_dense = A_torch.to_dense().numpy()
+        A_orig_dense = A_orig.toarray()
+
+        print("\nComparing A Matrices...")
+        np.testing.assert_allclose(
+            A_torch_dense,
+            A_orig_dense,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="A matrices are not equal.",
+        )
+        print("A Matrices are equal.")
+
+    def test_compare_RHS_vectors(self, tolerance=1e-8):
+        self.setUp()
+        simulation_torch = DCStaticSimulationCellCentered(
+            self.mesh_torch,
+            survey=self.survey_torch,
+            sigma=self.sigma,
+            bc_type="Dirichlet",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DCellCentered(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Dirichlet",
+        )
+
+        # Get RHS for simpeg-torch
+        b_torch = simulation_torch.getRHS(simulation_torch.survey.source_list[0])
+
+        # Get RHS for simpeg-old
+        b_orig = simulation_orig.getRHS().flatten()
+
+        print("\nComparing RHS Vectors...")
+        np.testing.assert_allclose(
+            b_torch.detach().numpy(),
+            b_orig,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="RHS vectors are not equal.",
+        )
+        print("RHS Vectors are equal.")
+
+    def test_compare_potential_fields(self, tolerance=1e-8):
+        self.setUp()
+        simulation_torch = DCStaticSimulationCellCentered(
+            self.mesh_torch,
+            survey=self.survey_torch,
+            sigma=self.sigma,
+            bc_type="Dirichlet",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DCellCentered(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Dirichlet",
+        )
+
+        resistivity_model = 1.0 / self.sigma
+
+        # Get A and b from simpeg-torch
+        A_torch = simulation_torch.getA(resistivity_model)
+        b_torch = simulation_torch.getRHS(simulation_torch.survey.source_list[0])
+
+        # Get A and b from simpeg-old
+        A_orig = simulation_orig.getA(resistivity_model.numpy())
+        b_orig = simulation_orig.getRHS().flatten()
+
+        # Solve using scipy.sparse.linalg.spsolve for both
+        x_torch = sparse.linalg.spsolve(torch_tensor_to_sp(A_torch), b_torch.numpy())
+        x_orig = sparse.linalg.spsolve(A_orig, b_orig)
+
+        print("\nComparing Potential Fields (Solver Output)...")
+        np.testing.assert_allclose(
+            x_torch,
+            x_orig,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="Potential fields (solver output) are not equal.",
+        )
+        print("Potential Fields (Solver Output) are equal.")
+
+    def test_compare_receiver_projections(self, tolerance=1e-7):
+        self.setUp()
+        simulation_torch = DCStaticSimulationCellCentered(
+            self.mesh_torch,
+            survey=self.survey_torch,
+            sigma=self.sigma,
+            bc_type="Dirichlet",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DCellCentered(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Dirichlet",
+        )
+
+        resistivity_model = 1.0 / self.sigma
+
+        # Get potential fields
+        fields_torch = simulation_torch.fields(resistivity_model)
+        fields_orig = simulation_orig.fields(self.sigma.numpy())
+
+        # Project fields to receivers
+        data_torch = simulation_torch.dpred(resistivity_model, f=fields_torch)
+        data_orig = simulation_orig.dpred(self.sigma.numpy(), f=fields_orig)
+
+        print("\nComparing Receiver Projections...")
+        np.testing.assert_allclose(
+            data_torch.detach().numpy(),
+            data_orig,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="Receiver projections are not equal.",
+        )
+        print("Receiver Projections are equal.")
+
+    def test_compare_DMfRhoI_matrices(self, tolerance=1e-8):
+        self.setUp()
+        simulation_torch = DCStaticSimulationCellCentered(
+            self.mesh_torch,
+            survey=self.survey_torch,
+            sigma=self.sigma,
+            bc_type="Dirichlet",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DCellCentered(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Dirichlet",
+        )
+
+        resistivity_model = 1.0 / self.sigma
+
+        # Calculate D @ MfRhoI for simpeg-torch
+        D_torch = simulation_torch.Div
+        MfRhoI_torch = simulation_torch.mesh.get_face_inner_product(
+            resistivity_model, invert_matrix=True
+        )
+        DMfRhoI_torch = D_torch @ MfRhoI_torch
+        DMfRhoI_torch_dense = DMfRhoI_torch.to_dense().numpy()
+
+        # Calculate D @ MfRhoI for simpeg
+        D_orig = simulation_orig.Div
+        MfRhoI_orig = simulation_orig.mesh.get_face_inner_product(
+            1.0 / self.sigma.numpy(), invert_matrix=True
+        )
+        DMfRhoI_orig = D_orig @ MfRhoI_orig
+        DMfRhoI_orig_dense = DMfRhoI_orig.toarray()
+
+        print("\nComparing D @ MfRhoI Matrices...")
+        np.testing.assert_allclose(
+            DMfRhoI_torch_dense,
+            DMfRhoI_orig_dense,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="D @ MfRhoI matrices are not equal.",
+        )
+        print("D @ MfRhoI Matrices are equal.")
+
+    def test_compare_MfRhoIG_matrices(self, tolerance=1e-8):
+        self.setUp()
+        simulation_torch = DCStaticSimulationCellCentered(
+            self.mesh_torch,
+            survey=self.survey_torch,
+            sigma=self.sigma,
+            bc_type="Dirichlet",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DCellCentered(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Dirichlet",
+        )
+
+        resistivity_model = 1.0 / self.sigma
+
+        # Calculate MfRhoI @ G for simpeg-torch
+        MfRhoI_torch = simulation_torch.mesh.get_face_inner_product(
+            resistivity_model, invert_matrix=True
+        )
+        G_torch = simulation_torch.Grad
+        MfRhoIG_torch = MfRhoI_torch @ G_torch
+        MfRhoIG_torch_dense = MfRhoIG_torch.to_dense().numpy()
+
+        # Calculate MfRhoI @ G for simpeg
+        MfRhoI_orig = simulation_orig.mesh.get_face_inner_product(
+            1.0 / self.sigma.numpy(), invert_matrix=True
+        )
+        G_orig = simulation_orig.Grad
+        MfRhoIG_orig = MfRhoI_orig @ G_orig
+        MfRhoIG_orig_dense = MfRhoIG_orig.toarray()
+
+        print("\nComparing MfRhoI @ G Matrices...")
+        np.testing.assert_allclose(
+            MfRhoIG_torch_dense,
+            MfRhoIG_orig_dense,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="MfRhoI @ G matrices are not equal.",
+        )
+        print("MfRhoI @ G Matrices are equal.")

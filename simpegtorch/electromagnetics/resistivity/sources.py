@@ -124,32 +124,19 @@ class BaseSrc:
             Right-hand side vector for this source
         """
 
-        # Check if this is a nodal or cell-centered formulation
         if hasattr(simulation, "_formulation") and simulation._formulation == "EB":
             # Nodal formulation: interpolate sources to nodes
-            return self._evaluate_nodal(simulation)
-        elif simulation.__class__.__name__ == "DCStaticSimulationNodal":
-            # Nodal simulation class
             return self._evaluate_nodal(simulation)
         else:
             # Cell-centered formulation: place sources at cell centers
             return self._evaluate_cell_centered(simulation)
 
     def _evaluate_cell_centered(self, simulation):
-        """Evaluate source for cell-centered formulation"""
+        """Evaluate source for cell-centered formulation (HJ equivalent)"""
         mesh = simulation.mesh
-        cell_centers = mesh.cell_centers
-
-        # Initialize RHS vector
-        q = torch.zeros(mesh.nC, dtype=torch.float64, device=mesh.device)
-
-        # For each electrode location, find closest cell and add current
-        for loc, curr in zip(self.location, self.current):
-            # Compute distances from this electrode to all cell centers
-            distances = torch.norm(cell_centers - loc.unsqueeze(0), dim=1)
-            closest_cell = torch.argmin(distances)
-            q[closest_cell] += curr
-
+        inds = mesh.closest_points_index(self.location, grid_loc="CC")
+        q = torch.zeros(mesh.nC, dtype=self.current.dtype, device=self.current.device)
+        q[inds] = self.current
         return q
 
     def build_receiver_tensor(self, mesh, projected_grid: str = "N"):
@@ -186,19 +173,10 @@ class BaseSrc:
 
         # For nodal formulation, we need to interpolate to nodes
         # This is similar to original SimPEG's approach
-
-        # Initialize RHS vector for nodes
-        q = torch.zeros(mesh.nN, dtype=torch.float64, device=mesh.device)
-
-        # Get node locations
-        nodes = mesh.gridN  # torch.Tensor of shape (n_nodes, dim)
-
-        # For each electrode location, find closest nodes and interpolate
-        for loc, curr in zip(self.location, self.current):
-            # Simple approach: find closest node (could be improved with proper interpolation)
-            distances = torch.norm(nodes - loc.unsqueeze(0), dim=1)
-            closest_node = torch.argmin(distances)
-            q[closest_node] += curr
+        interpolation_matrix = mesh.get_interpolation_matrix(
+            self.location, location_type="N"
+        ).to_dense()
+        q = torch.sum(self.current.unsqueeze(1) * interpolation_matrix, dim=0)
 
         return q
 
