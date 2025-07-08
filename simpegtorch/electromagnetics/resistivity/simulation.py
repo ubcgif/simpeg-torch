@@ -1,5 +1,9 @@
 import torch
-from simpegtorch.torchmatsolver import TorchMatSolver
+from simpegtorch.torchmatsolver import (
+    TorchMatSolver,
+    TorchMUMPSsolver,
+)
+
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.discretize.utils import sdiag
 from scipy import sparse
@@ -9,11 +13,11 @@ from .sources import BaseSrc
 
 class BaseDcSimulation:
     """Base class for DC resistivity simulations with common functionality."""
-    
+
     def __init__(self, mesh: TensorMesh, survey=None, **kwargs):
         self.mesh = mesh
         self.survey = survey
-    
+
     def getRHS(self, source: Optional[BaseSrc] = None):
         """
         Returns the right-hand side vector b for the DC resistivity problem.
@@ -220,7 +224,9 @@ class BaseDcSimulation:
 
     def _prepare_field_for_receivers(self, src_field, rx_tensor):
         """Prepare field tensor for receiver computation. Must be implemented by subclasses."""
-        raise NotImplementedError("Subclasses must implement _prepare_field_for_receivers method")
+        raise NotImplementedError(
+            "Subclasses must implement _prepare_field_for_receivers method"
+        )
 
 
 class Simulation3DCellCentered(BaseDcSimulation):
@@ -230,7 +236,7 @@ class Simulation3DCellCentered(BaseDcSimulation):
         survey=None,
         bc_type: str = "Dirichlet",
         sigma=None,
-        rho = None,
+        rho=None,
         **kwargs,
     ):
         super().__init__(mesh, survey, **kwargs)
@@ -364,11 +370,16 @@ class Simulation3DCellCentered(BaseDcSimulation):
             # Solve for specific source
             b = self.getRHS(source)
 
-            def solve_fn(A, b):
-                return sparse.linalg.spsolve(A, b)
+            try:
+                return TorchMUMPSsolver.apply(A, b)
+            except ImportError:
+                print("MUMPS not installed, falling back")
 
-            x = TorchMatSolver.apply(A, b, solve_fn)
-            return x
+                def solve_fn(A, b):
+                    return sparse.linalg.spsolve(A, b)
+
+                x = TorchMatSolver.apply(A, b, solve_fn)
+                return x
 
         sources = self.survey.source_list
 
@@ -379,10 +390,17 @@ class Simulation3DCellCentered(BaseDcSimulation):
         fields = {}
 
         b_tensor = self.survey.get_source_tensor(self)  # Cell-centered formulation
-        field_tensor = torch.vmap(
-            TorchMatSolver.apply,
-            in_dims=(None, 0, None),
-        )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
+        try:
+            field_tensor = torch.vmap(
+                TorchMUMPSsolver.apply,
+                in_dims=(None, 0, None),
+            )(A, b_tensor)
+        except ImportError:
+            print("MUMPS not installed, falling back")
+            field_tensor = torch.vmap(
+                TorchMatSolver.apply,
+                in_dims=(None, 0, None),
+            )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
 
         for i, src in enumerate(sources):
             # Store field for each source
@@ -578,11 +596,16 @@ class Simulation3DNodal(BaseDcSimulation):
             b = self.getRHS(source)
             b = self._apply_neumann_bc_to_rhs(b)
 
-            def solve_fn(A, b):
-                return sparse.linalg.spsolve(A, b)
+            try:
+                return TorchMUMPSsolver.apply(A, b)
+            except ImportError:
+                print("MUMPS not installed, falling back")
 
-            x = TorchMatSolver.apply(A, b, solve_fn)
-            return x
+                def solve_fn(A, b):
+                    return sparse.linalg.spsolve(A, b)
+
+                x = TorchMatSolver.apply(A, b, solve_fn)
+                return x
 
         sources = self.survey.source_list
 
@@ -595,10 +618,17 @@ class Simulation3DNodal(BaseDcSimulation):
         b_tensor = self.survey.get_source_tensor(self)  # Cell-centered formulation
         b_tensor = self._apply_neumann_bc_to_rhs_tensor(b_tensor)
 
-        field_tensor = torch.vmap(
-            TorchMatSolver.apply,
-            in_dims=(None, 0, None),
-        )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
+        try:
+            field_tensor = torch.vmap(
+                TorchMUMPSsolver.apply,
+                in_dims=(None, 0, None),
+            )(A, b_tensor)
+        except ImportError:
+            print("MUMPS not installed, falling back")
+            field_tensor = torch.vmap(
+                TorchMatSolver.apply,
+                in_dims=(None, 0, None),
+            )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
 
         for i, src in enumerate(sources):
             # Store field for each source

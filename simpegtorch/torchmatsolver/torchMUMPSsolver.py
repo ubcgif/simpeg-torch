@@ -4,6 +4,7 @@ from .utils import torch_tensor_to_sp, sparsified_outer
 
 try:
     from pymatsolver import Mumps
+
     _mumps_available = True
 except ImportError:
     _mumps_available = False
@@ -19,13 +20,15 @@ class TorchMUMPSsolver(Function):
         Forward pass to solve Ax = b using pymatsolver MUMPS solver.
         """
         if not _mumps_available:
-            raise ImportError("pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps")
-        
+            raise ImportError(
+                "pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps"
+            )
+
         A_np_csc = torch_tensor_to_sp(A, sp_type="csc")
-        
+
         # Create MUMPS solver instance
         mumps_solver = Mumps(A_np_csc)
-        
+
         # Solve the system
         x = mumps_solver.solve(b.cpu().numpy())
 
@@ -99,20 +102,22 @@ class TorchMUMPSsolver(Function):
                 raise NotImplementedError("Only batching on dimension 0 is supported")
 
             if not _mumps_available:
-                raise ImportError("pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps")
+                raise ImportError(
+                    "pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps"
+                )
 
             # Convert A to sparse CSC format once
             A_np_csc = torch_tensor_to_sp(A, sp_type="csc")
-            
+
             # Create MUMPS solver instance and factor once
             mumps_solver = Mumps(A_np_csc)
-            
+
             # Convert all RHS vectors to numpy and solve in batch
-            b_np = b.cpu().numpy()  # Shape: (batch_size, n)
-            
+            b_np = b.cpu().detach().numpy()  # Shape: (batch_size, n)
+
             # Solve for all RHS vectors at once using MUMPS multiple RHS capability
             x_np = mumps_solver.solve(b_np.T)  # Transpose for column-major multiple RHS
-            
+
             # Convert back to torch tensor
             if x_np.ndim == 1:
                 # Single RHS case
@@ -120,7 +125,9 @@ class TorchMUMPSsolver(Function):
                 return x.unsqueeze(0), 0
             else:
                 # Multiple RHS case
-                x = torch.tensor(x_np.T, dtype=b.dtype, device=b.device)  # Transpose back
+                x = torch.tensor(
+                    x_np.T, dtype=b.dtype, device=b.device
+                )  # Transpose back
                 return x, 0
 
     @staticmethod
@@ -136,7 +143,9 @@ class TorchMUMPSsolver(Function):
         needs_grad_A, _ = ctx.needs_input_grad
 
         if not _mumps_available:
-            raise ImportError("pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps")
+            raise ImportError(
+                "pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps"
+            )
 
         # Compute the gradient of the solution with respect to b
         # grad_b = A^{-1} * grad_output (since A is symmetric)
