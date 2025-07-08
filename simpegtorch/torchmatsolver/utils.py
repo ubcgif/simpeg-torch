@@ -12,7 +12,7 @@ def torch_tensor_to_sp(tensor: torch.tensor, sp_type="csr"):
         tensor_coalesced = tensor.coalesce()
         tensor_np = sp.coo_matrix(
             (
-                tensor_coalesced.values().cpu().numpy(),
+                tensor_coalesced.detach().values().cpu().numpy(),
                 (
                     tensor_coalesced.indices()[0].cpu().numpy(),
                     tensor_coalesced.indices()[1].cpu().numpy(),

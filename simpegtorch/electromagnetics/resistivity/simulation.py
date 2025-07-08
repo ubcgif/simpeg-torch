@@ -393,7 +393,7 @@ class Simulation3DCellCentered(BaseDcSimulation):
         try:
             field_tensor = torch.vmap(
                 TorchMUMPSsolver.apply,
-                in_dims=(None, 0, None),
+                in_dims=(None, 0),
             )(A, b_tensor)
         except ImportError:
             print("MUMPS not installed, falling back")
@@ -621,7 +621,7 @@ class Simulation3DNodal(BaseDcSimulation):
         try:
             field_tensor = torch.vmap(
                 TorchMUMPSsolver.apply,
-                in_dims=(None, 0, None),
+                in_dims=(None, 0),
             )(A, b_tensor)
         except ImportError:
             print("MUMPS not installed, falling back")
