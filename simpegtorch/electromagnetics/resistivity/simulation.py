@@ -7,19 +7,23 @@ from typing import Optional
 from .sources import BaseSrc
 
 
-class DCStaticSimulationCellCentered:
+class Simulation3DCellCentered:
     def __init__(
         self,
         mesh: TensorMesh,
         survey=None,
         bc_type: str = "Dirichlet",
         sigma=None,
+        rho = None,
         **kwargs,
     ):
         self.mesh = mesh
         self.survey = survey
         self.bc_type = bc_type
-        self.sigma = sigma
+        if sigma is not None:
+            self.sigma = torch.as_tensor(sigma)
+        if rho is not None:
+            self.rho = torch.as_tensor(rho)
         self.setBC()
 
     @property
@@ -145,15 +149,16 @@ class DCStaticSimulationCellCentered:
         """
         # Use stored sigma if resistivity not provided
         if resistivity is None:
-            if self.sigma is None:
+            if self.sigma is None and self.rho is None:
                 raise ValueError(
                     "Either provide resistivity or set sigma in constructor"
                 )
             # Convert conductivity to resistivity
-            if isinstance(self.sigma, torch.Tensor):
+            elif self.sigma is not None:
                 resistivity = 1.0 / self.sigma
             else:
-                resistivity = 1.0 / torch.tensor(self.sigma, dtype=torch.float64)
+                resistivity = self.rho
+
         A = self.getA(resistivity)
 
         if source is not None:
@@ -359,7 +364,7 @@ class DCStaticSimulationCellCentered:
         return (f_plus - f_minus) / (2 * eps)
 
 
-class DCStaticSimulationNodal:
+class Simulation3DNodal:
     # Define formulation type for source evaluation
     _formulation = "EB"  # Electric field and magnetic flux density (nodal potentials)
 
@@ -546,15 +551,16 @@ class DCStaticSimulationNodal:
         """
         # Use stored sigma if resistivity not provided
         if resistivity is None:
-            if self.sigma is None:
+            if self.sigma is None and self.rho is None:
                 raise ValueError(
                     "Either provide resistivity or set sigma in constructor"
                 )
             # Convert conductivity to resistivity
-            if isinstance(self.sigma, torch.Tensor):
+            elif self.sigma is not None:
                 resistivity = 1.0 / self.sigma
             else:
-                resistivity = 1.0 / torch.tensor(self.sigma, dtype=torch.float64)
+                resistivity = self.rho
+
         A = self.getA(resistivity)
 
         if source is not None:

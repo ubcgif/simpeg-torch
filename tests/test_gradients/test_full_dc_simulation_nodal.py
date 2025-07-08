@@ -13,7 +13,7 @@ These tests verify the complete gradient flow through the nodal DC simulation:
 import torch
 import pytest
 from simpegtorch.discretize import TensorMesh
-from simpegtorch.electromagnetics.resistivity.simulation import DCStaticSimulationNodal
+from simpegtorch.electromagnetics.resistivity.simulation import Simulation3DNodal
 from simpegtorch.electromagnetics.resistivity import sources, receivers, survey
 
 
@@ -60,7 +60,7 @@ def test_dc_simulation_nodal_fields_with_gradients():
     surv = survey.Survey([src])
 
     # Create nodal DC simulation with survey
-    sim = DCStaticSimulationNodal(mesh, survey=surv, bc_type="Neumann")
+    sim = Simulation3DNodal(mesh, survey=surv, bc_type="Neumann")
 
     # Compute fields - this tests the complete gradient flow through:
     # 1. Source discretization to mesh nodes
@@ -109,7 +109,7 @@ def test_dc_simulation_nodal_jtvec():
     src = sources.Dipole([rx], location_a=src_a, location_b=src_b, current=1.0)
 
     surv = survey.Survey([src])
-    sim = DCStaticSimulationNodal(mesh, survey=surv, bc_type="Neumann")
+    sim = Simulation3DNodal(mesh, survey=surv, bc_type="Neumann")
 
     # Test Jtvec computation
     v = torch.ones(sim.n_data, dtype=torch.float64)
@@ -168,7 +168,7 @@ def test_dc_simulation_nodal_multiple_sources():
 
     # Create survey and simulation
     surv = survey.Survey(sources_list)
-    sim = DCStaticSimulationNodal(mesh, survey=surv, bc_type="Neumann")
+    sim = Simulation3DNodal(mesh, survey=surv, bc_type="Neumann")
 
     # Test field computation for multiple sources
     fields = sim.fields(resistivity)
@@ -246,7 +246,7 @@ def test_dc_simulation_nodal_apparent_resistivity():
     src = sources.Dipole([rx], location_a=src_a, location_b=src_b, current=1.0)
 
     surv = survey.Survey([src])
-    sim = DCStaticSimulationNodal(mesh, survey=surv, bc_type="Neumann")
+    sim = Simulation3DNodal(mesh, survey=surv, bc_type="Neumann")
 
     # Compute predicted data (potential differences)
     predicted_data = sim.dpred(resistivity)
@@ -298,16 +298,16 @@ def test_dc_simulation_nodal_vs_cell_centered_consistency():
     surv = survey.Survey([src])
 
     # Run nodal simulation
-    sim_nodal = DCStaticSimulationNodal(mesh, survey=surv, bc_type="Neumann")
+    sim_nodal = Simulation3DNodal(mesh, survey=surv, bc_type="Neumann")
     data_nodal = sim_nodal.dpred(resistivity)
 
     # Import cell-centered simulation
     from simpegtorch.electromagnetics.resistivity.simulation import (
-        DCStaticSimulationCellCentered,
+        Simulation3DCellCentered,
     )
 
     # Run cell-centered simulation
-    sim_cc = DCStaticSimulationCellCentered(mesh, survey=surv, bc_type="Dirichlet")
+    sim_cc = Simulation3DCellCentered(mesh, survey=surv, bc_type="Dirichlet")
     data_cc = sim_cc.dpred(resistivity)
 
     # Both should produce similar results for homogeneous medium

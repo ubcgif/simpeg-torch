@@ -19,7 +19,7 @@ from matplotlib.colors import LogNorm
 # simpeg-torch imports
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.electromagnetics.resistivity import (
-    DCStaticSimulationNodal,
+    Simulation3DNodal,
     Survey,
 )
 from simpegtorch.electromagnetics.utils import (
@@ -179,7 +179,7 @@ try:
 
     # Create nodal simulation (better for surface DC data)
     # Nodal formulation uses Neumann boundary conditions by default
-    simulation = DCStaticSimulationNodal(mesh, survey=survey)
+    simulation = Simulation3DNodal(mesh, survey=survey)
     print(f"Created nodal simulation with {simulation.bc_type} boundary conditions")
 
     # For nodal formulation, we work with resistivity values on mesh nodes

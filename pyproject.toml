@@ -22,6 +22,7 @@ dependencies = [
     "libdlf",
     "typing_extensions; python_version<'3.13'",
     "pytest>=8.4.1",
+    "simpeg>=0.24.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

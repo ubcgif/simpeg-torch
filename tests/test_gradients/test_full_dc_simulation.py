@@ -5,7 +5,7 @@ Test complete DC simulation workflow with gradient computation using new source/
 import torch
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.electromagnetics.resistivity.simulation import (
-    DCStaticSimulationCellCentered,
+    Simulation3DCellCentered,
 )
 from simpegtorch.electromagnetics.resistivity import sources, receivers, survey
 
@@ -55,7 +55,7 @@ def test_dc_simulation_fields_with_gradients():
     surv = survey.Survey([src])
 
     # Create DC simulation with survey
-    sim = DCStaticSimulationCellCentered(mesh, survey=surv)
+    sim = Simulation3DCellCentered(mesh, survey=surv)
     sim.setBC()
 
     # Compute fields - this tests the complete gradient flow through:
@@ -147,7 +147,7 @@ def test_dc_simulation_jtvec():
 
     # Create survey and simulation
     surv = survey.Survey([src])
-    sim = DCStaticSimulationCellCentered(mesh, survey=surv)
+    sim = Simulation3DCellCentered(mesh, survey=surv)
     sim.setBC()
 
     # Test Jtvec
@@ -219,7 +219,7 @@ def test_dc_simulation_multiple_sources():
 
     # Create survey with multiple sources
     surv = survey.Survey([src1, src2, src3])
-    sim = DCStaticSimulationCellCentered(mesh, survey=surv)
+    sim = Simulation3DCellCentered(mesh, survey=surv)
     sim.setBC()
 
     # Test forward modeling
@@ -289,7 +289,7 @@ def test_dc_simulation_apparent_resistivity():
     geometric_factors = surv.set_geometric_factor(space_type="halfspace")
 
     # Create simulation
-    sim = DCStaticSimulationCellCentered(mesh, survey=surv)
+    sim = Simulation3DCellCentered(mesh, survey=surv)
     sim.setBC()
 
     # Test apparent resistivity calculation

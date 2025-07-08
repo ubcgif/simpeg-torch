@@ -11,7 +11,7 @@ from matplotlib.colors import LogNorm
 # simpeg-torch imports
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.electromagnetics.resistivity import (
-    DCStaticSimulationNodal,
+    Simulation3DNodal,
     SrcDipole,
     RxDipole,
     Survey,
@@ -167,7 +167,7 @@ print(f"Survey: {survey.nSrc} sources, {survey.nD} data points")
 
 try:
     print("\n=== RUNNING FORWARD SIMULATION ===")
-    simulation = DCStaticSimulationNodal(mesh, survey=survey)
+    simulation = Simulation3DNodal(mesh, survey=survey)
 
     # Run forward simulation
     print("Computing forward data...")

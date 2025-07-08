@@ -24,25 +24,25 @@ Survey
     Survey - Container for sources and receivers with geometric factors
 """
 
-from .simulation import DCStaticSimulationCellCentered, DCStaticSimulationNodal
+from .simulation import Simulation3DCellCentered, Simulation3DNodal
 from .sources import BaseSrc, Pole as SrcPole, Dipole as SrcDipole, Multipole
 from .receivers import BaseRx, Pole as RxPole, Dipole as RxDipole
 from .survey import Survey
 
 # Main simulation class
-Simulation = DCStaticSimulationCellCentered
+Simulation = Simulation3DCellCentered
 
 # Aliases for common usage patterns and backward compatibility
-Simulation3DCellCentered = DCStaticSimulationCellCentered
-Simulation3DNodal = DCStaticSimulationNodal
+Simulation3DCellCentered = Simulation3DCellCentered
+Simulation3DNodal = Simulation3DNodal
 Src = BaseSrc
 Rx = BaseRx
 
 __all__ = [
     # Main simulation
     "Simulation",
-    "DCStaticSimulationCellCentered",
-    "DCStaticSimulationNodal",
+    "Simulation3DCellCentered",
+    "Simulation3DNodal",
     "Simulation3DCellCentered",
     "Simulation3DNodal",
     # Sources

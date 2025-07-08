@@ -5,8 +5,8 @@ import unittest
 
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.electromagnetics.resistivity import (
-    DCStaticSimulationNodal,
-    DCStaticSimulationCellCentered,
+    Simulation3DNodal,
+    Simulation3DCellCentered,
     SrcDipole,
     RxDipole,
     Survey,
@@ -101,7 +101,7 @@ class DCSolutionTest(unittest.TestCase):
     def test_dc_nodal_fields(self, tolerance=0.1):
         # Create Nodal Neumann sim in both simpegtorch and simpeg
         self.setUp()
-        simulation_torch = DCStaticSimulationNodal(
+        simulation_torch = Simulation3DNodal(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -167,7 +167,7 @@ class DCSolutionTest(unittest.TestCase):
     def test_dc_cell_centered_fields(self, tolerance=0.1):
         # Create Cell-Centered Dirichlet sim in both simpegtorch and simpeg
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -238,7 +238,7 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_compare_A_matrices(self, tolerance=1e-8):
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -291,7 +291,7 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_compare_RHS_vectors(self, tolerance=1e-8):
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -323,7 +323,7 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_compare_potential_fields(self, tolerance=1e-8):
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -363,7 +363,7 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_compare_receiver_projections(self, tolerance=1e-7):
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -399,7 +399,7 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_compare_DMfRhoI_matrices(self, tolerance=1e-8):
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
@@ -443,7 +443,7 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_compare_MfRhoIG_matrices(self, tolerance=1e-8):
         self.setUp()
-        simulation_torch = DCStaticSimulationCellCentered(
+        simulation_torch = Simulation3DCellCentered(
             self.mesh_torch,
             survey=self.survey_torch,
             sigma=self.sigma,
