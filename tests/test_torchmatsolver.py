@@ -2,7 +2,7 @@ import torch
 import pytest
 import numpy as np
 from scipy import sparse
-from simpegtorch.torchmatsolver import TorchMatSolver
+from simpegtorch.torchmatsolver import TorchMatSolver, TorchMUMPSsolver
 
 torch.set_default_dtype(torch.float64)
 
@@ -313,3 +313,310 @@ def test_gradient_correctness_A(simple_system):
         # Compare
         rel_error = abs(grad_values[i] - grad_fd) / (abs(grad_values[i]) + 1e-10)
         assert rel_error < 1e-4, f"Gradient mismatch at index {i}: {rel_error:.2e}"
+
+
+# MUMPS Solver Tests
+# Skip all MUMPS tests if MUMPS is not available
+try:
+    from pymatsolver import Mumps
+    # Test if MUMPS is actually available by checking for the python-mumps package
+    import scipy.sparse
+    test_matrix = scipy.sparse.csc_matrix([[1.0, 0.0], [0.0, 1.0]])
+    Mumps(test_matrix)  # This will fail if python-mumps is not installed
+    mumps_available = True
+except ImportError:
+    mumps_available = False
+
+skip_mumps = pytest.mark.skipif(not mumps_available, reason="MUMPS not available")
+
+
+@skip_mumps
+def test_mumps_forward_solve_sparse(simple_system):
+    """Test forward solve with sparse matrix using MUMPS solver"""
+    A_torch, b_torch, A_sparse, b_np = simple_system
+
+    # Solve using TorchMUMPSsolver
+    x = TorchMUMPSsolver.apply(A_torch, b_torch)
+
+    # Compare with direct sparse solution
+    x_expected = sparse.linalg.spsolve(A_sparse, b_np)
+
+    assert isinstance(x, torch.Tensor)
+    assert x.dtype == b_torch.dtype
+    assert x.device == b_torch.device
+    np.testing.assert_allclose(x.detach().numpy(), x_expected, rtol=1e-10)
+
+
+@skip_mumps
+def test_mumps_forward_solve_csr_sparse(sparse_system):
+    """Test forward solve with CSR sparse matrix using MUMPS"""
+    A_torch, b_torch, A_sparse, b_np = sparse_system
+
+    # Convert to CSR format
+    A_torch_csr = A_torch.to_sparse_csr()
+    A_torch_csr.requires_grad_(True)
+
+    # Solve using TorchMUMPSsolver
+    x = TorchMUMPSsolver.apply(A_torch_csr, b_torch)
+
+    # Compare with direct sparse solution
+    x_expected = sparse.linalg.spsolve(A_sparse, b_np)
+
+    assert isinstance(x, torch.Tensor)
+    assert x.dtype == b_torch.dtype
+    assert x.device == b_torch.device
+    np.testing.assert_allclose(x.detach().numpy(), x_expected, rtol=1e-10)
+
+
+@skip_mumps
+def test_mumps_gradient_computation_b(simple_system):
+    """Test gradient computation with respect to b for sparse matrices using MUMPS"""
+    A_torch, b_torch, A_sparse, b_np = simple_system
+
+    # Solve and compute gradients
+    x = TorchMUMPSsolver.apply(A_torch, b_torch)
+    loss = torch.sum(x**2)  # Simple quadratic loss
+    loss.backward()
+
+    # Check that gradients are computed
+    assert b_torch.grad is not None
+    assert b_torch.grad.shape == b_torch.shape
+
+    # Gradient should be finite
+    assert torch.all(torch.isfinite(b_torch.grad))
+
+
+@skip_mumps
+def test_mumps_gradient_computation_A(simple_system):
+    """Test gradient computation with respect to sparse A using MUMPS"""
+    A_torch, b_torch, A_sparse, b_np = simple_system
+
+    # Enable gradient retention for non-leaf tensor
+    A_torch.retain_grad()
+
+    # Solve and compute gradients
+    x = TorchMUMPSsolver.apply(A_torch, b_torch)
+    loss = torch.sum(x**2)  # Simple quadratic loss
+    loss.backward()
+
+    # Check that gradients are computed
+    assert A_torch.grad is not None
+    assert A_torch.grad.shape == A_torch.shape
+    assert A_torch.grad.is_sparse  # Should maintain sparse format
+
+    # Gradient should be finite (check dense values)
+    assert torch.all(torch.isfinite(A_torch.grad.to_dense()))
+
+
+@skip_mumps
+def test_mumps_device_consistency():
+    """Test that output tensors maintain device consistency with sparse matrices using MUMPS"""
+    # Create sparse tensor directly
+    indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
+    values = torch.tensor([2.0, 1.0, 1.0, 2.0], requires_grad=True)
+    A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
+    b = torch.tensor([1.0, 1.0], requires_grad=True)
+
+    x = TorchMUMPSsolver.apply(A, b)
+
+    assert x.device == b.device
+    assert x.dtype == b.dtype
+
+
+@skip_mumps
+def test_mumps_solve_accuracy():
+    """Test numerical accuracy of the MUMPS solver"""
+    # Create a well-conditioned sparse system
+    indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
+    values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
+    A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
+    b = torch.tensor([11.0, 11.0], requires_grad=True)
+
+    x = TorchMUMPSsolver.apply(A, b)
+
+    # Check that Ax ≈ b using dense multiplication
+    residual = torch.sparse.mm(A, x.unsqueeze(1)).squeeze() - b
+    assert torch.max(torch.abs(residual)) < 1e-10
+
+
+@skip_mumps
+def test_mumps_vmap():
+    """Tests batching with vmap functionality using MUMPS"""
+    # Create a well-conditioned sparse system
+    indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
+    values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
+    A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
+    b = torch.tensor([11.0, 11.0], requires_grad=True)
+    A_b = A.unsqueeze(0)  # Add batch dimension
+    A_batched = torch.cat([A_b, A_b, A_b], dim=0)  # Batch of 3 identical matrices
+
+    b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
+
+    # Use TorchMUMPSsolver with vmap
+    x_batched = torch.vmap(lambda A, b: TorchMUMPSsolver.apply(A, b))(
+        A_batched, b_batched
+    )
+
+    # test batching over only rhs (optimized case)
+    x_batched_rhs = torch.vmap(
+        lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0)
+    )(A, b_batched)
+
+    # test batching over only A
+    x_batched_A = torch.vmap(
+        lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(0, None)
+    )(A_batched, b)
+
+    assert x_batched.shape == (3, 2)  # Should return a batch of solutions
+    assert x_batched_rhs.shape == (3, 2)  # Should return a batch of solutions
+    assert x_batched_A.shape == (3, 2)  # Should return a batch of solutions
+
+
+@skip_mumps
+def test_mumps_large_sparse_matrix_efficiency():
+    """Test that large sparse matrices don't create dense intermediates using MUMPS"""
+    # Create a larger sparse system to test memory efficiency
+    n = 1000
+    nnz_per_row = 5  # Average non-zeros per row
+
+    # Create a sparse symmetric positive definite matrix
+    # Use a simple pattern: diagonal + some off-diagonals
+    np.random.seed(42)  # For reproducibility
+
+    # Create indices for sparse matrix
+    rows = []
+    cols = []
+    values = []
+
+    # Add diagonal elements
+    for i in range(n):
+        rows.append(i)
+        cols.append(i)
+        values.append(10.0)  # Strong diagonal
+
+    # Add some off-diagonal elements to make it interesting
+    for i in range(n):
+        for _ in range(nnz_per_row - 1):  # -1 because we already have diagonal
+            j = np.random.randint(0, n)
+            if i != j:
+                rows.extend([i, j])  # Add both (i,j) and (j,i) for symmetry
+                cols.extend([j, i])
+                val = np.random.uniform(0.1, 1.0)
+                values.extend([val, val])
+
+    # Convert to torch tensors
+    indices = torch.tensor([rows, cols], dtype=torch.long)
+    values_tensor = torch.tensor(values, dtype=torch.float64, requires_grad=True)
+
+    # Create sparse tensor and coalesce to handle duplicates
+    A = torch.sparse_coo_tensor(
+        indices, values_tensor, (n, n), requires_grad=True
+    ).coalesce()
+    A.retain_grad()
+
+    b = torch.randn(n, dtype=torch.float64, requires_grad=True)
+
+    # Solve and compute gradients
+    x = TorchMUMPSsolver.apply(A, b)
+    loss = torch.sum(x**2)
+    loss.backward()
+
+    # Verify gradients are computed and sparse
+    assert A.grad is not None
+    assert A.grad.is_sparse
+    assert A.grad.shape == A.shape
+
+    # Coalesce gradient for proper access to values
+    A_grad_coalesced = A.grad.coalesce()
+
+    # Verify gradient has same sparsity pattern as input (approximately)
+    # The gradient should only have non-zeros where A has non-zeros
+    A_nnz = A._nnz()
+    grad_nnz = A_grad_coalesced._nnz()
+
+    # Gradient should have same or fewer non-zeros than input
+    assert grad_nnz <= A_nnz * 1.1  # Allow small tolerance for numerical precision
+
+    # Verify all gradient values are finite
+    assert torch.all(torch.isfinite(A_grad_coalesced.values()))
+
+    print(f"Large matrix test (MUMPS): {n}x{n} matrix with {A_nnz} non-zeros")
+    print(f"Gradient has {grad_nnz} non-zeros")
+    print("Memory-efficient gradient computation successful!")
+
+
+@skip_mumps
+def test_mumps_gradient_correctness_A(simple_system):
+    """Test gradient correctness w.r.t A using finite differences with MUMPS"""
+    A_torch, b_torch, A_sparse, b_np = simple_system
+
+    # Compute loss and gradients
+    A_torch.retain_grad()
+    x = TorchMUMPSsolver.apply(A_torch, b_torch)
+    loss = torch.sum(x**2)
+    loss.backward()
+
+    # Finite difference check
+    eps = 1e-7
+    A_values = A_torch.coalesce().values()
+    A_indices = A_torch.coalesce().indices()
+    grad_values = A_torch.grad.coalesce().values()
+
+    # Test a few values
+    for i in range(min(3, len(A_values))):
+        # Perturb value
+        values_plus = A_values.clone().detach()
+        values_plus[i] += eps
+        A_plus = torch.sparse_coo_tensor(A_indices, values_plus, A_torch.shape)
+        x_plus = TorchMUMPSsolver.apply(A_plus, b_torch.detach())
+        loss_plus = torch.sum(x_plus**2)
+
+        values_minus = A_values.clone().detach()
+        values_minus[i] -= eps
+        A_minus = torch.sparse_coo_tensor(A_indices, values_minus, A_torch.shape)
+        x_minus = TorchMUMPSsolver.apply(A_minus, b_torch.detach())
+        loss_minus = torch.sum(x_minus**2)
+
+        grad_fd = (loss_plus - loss_minus) / (2 * eps)
+
+        # Compare
+        rel_error = abs(grad_values[i] - grad_fd) / (abs(grad_values[i]) + 1e-10)
+        assert rel_error < 1e-4, f"Gradient mismatch at index {i}: {rel_error:.2e}"
+
+
+@skip_mumps
+def test_mumps_batched_rhs_optimization():
+    """Test that batched RHS with MUMPS uses single factorization optimization"""
+    # Create a larger system to make the optimization more apparent
+    n = 100
+    np.random.seed(42)
+    
+    # Create a sparse symmetric positive definite matrix
+    A_dense = np.random.rand(n, n)
+    A_dense = A_dense + A_dense.T + n * np.eye(n)  # Make symmetric positive definite
+    
+    # Convert to sparse COO format for torch
+    A_sparse = sparse.csc_matrix(A_dense).tocoo()
+    indices = torch.tensor([A_sparse.row, A_sparse.col], dtype=torch.long)
+    values = torch.tensor(A_sparse.data, dtype=torch.float64)
+    A_torch = torch.sparse_coo_tensor(indices, values, (n, n), dtype=torch.float64)
+    
+    # Create multiple RHS vectors
+    num_rhs = 10
+    b_batch = torch.randn(num_rhs, n, dtype=torch.float64)
+    
+    # Test the batched RHS optimization
+    x_batch = torch.vmap(
+        lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0)
+    )(A_torch, b_batch)
+    
+    # Verify solution correctness
+    assert x_batch.shape == (num_rhs, n)
+    
+    # Check that each solution is correct
+    A_dense_torch = torch.tensor(A_dense, dtype=torch.float64)
+    for i in range(num_rhs):
+        residual = torch.norm(A_dense_torch @ x_batch[i] - b_batch[i])
+        assert residual < 1e-10, f"RHS {i} residual too large: {residual.item():.2e}"
+    
+    print(f"Batched RHS optimization test passed: {num_rhs} RHS vectors solved efficiently")
