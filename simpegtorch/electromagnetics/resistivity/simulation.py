@@ -1,12 +1,9 @@
 import torch
-from simpegtorch.torchmatsolver import (
-    TorchMatSolver,
-    TorchMUMPSsolver,
-)
+from simpegtorch.torchmatsolver.torchMUMPSsolver_batched import batched_mumps_solve
+from simpegtorch.torchmatsolver.torchmatsolver_batched import batched_sparse_solve
 
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.discretize.utils import sdiag
-from scipy import sparse
 from typing import Optional
 from .sources import BaseSrc
 
@@ -371,15 +368,10 @@ class Simulation3DCellCentered(BaseDcSimulation):
             b = self.getRHS(source)
 
             try:
-                return TorchMUMPSsolver.apply(A, b)
+                return batched_mumps_solve(A, b)
             except ImportError:
                 print("MUMPS not installed, falling back")
-
-                def solve_fn(A, b):
-                    return sparse.linalg.spsolve(A, b)
-
-                x = TorchMatSolver.apply(A, b, solve_fn)
-                return x
+                return batched_sparse_solve(A, b)
 
         sources = self.survey.source_list
 
@@ -390,17 +382,14 @@ class Simulation3DCellCentered(BaseDcSimulation):
         fields = {}
 
         b_tensor = self.survey.get_source_tensor(self)  # Cell-centered formulation
+
+        # Use native batched solvers instead of vmap for better gradient support
         try:
-            field_tensor = torch.vmap(
-                TorchMUMPSsolver.apply,
-                in_dims=(None, 0),
-            )(A, b_tensor)
+            print("Using batched MUMPS solver")
+            field_tensor = batched_mumps_solve(A, b_tensor)
         except ImportError:
-            print("MUMPS not installed, falling back")
-            field_tensor = torch.vmap(
-                TorchMatSolver.apply,
-                in_dims=(None, 0, None),
-            )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
+            print("MUMPS not installed, falling back to scipy")
+            field_tensor = batched_sparse_solve(A, b_tensor)
 
         for i, src in enumerate(sources):
             # Store field for each source
@@ -597,15 +586,10 @@ class Simulation3DNodal(BaseDcSimulation):
             b = self._apply_neumann_bc_to_rhs(b)
 
             try:
-                return TorchMUMPSsolver.apply(A, b)
+                return batched_mumps_solve(A, b)
             except ImportError:
                 print("MUMPS not installed, falling back")
-
-                def solve_fn(A, b):
-                    return sparse.linalg.spsolve(A, b)
-
-                x = TorchMatSolver.apply(A, b, solve_fn)
-                return x
+                return batched_sparse_solve(A, b)
 
         sources = self.survey.source_list
 
@@ -619,16 +603,10 @@ class Simulation3DNodal(BaseDcSimulation):
         b_tensor = self._apply_neumann_bc_to_rhs_tensor(b_tensor)
 
         try:
-            field_tensor = torch.vmap(
-                TorchMUMPSsolver.apply,
-                in_dims=(None, 0),
-            )(A, b_tensor)
+            field_tensor = batched_mumps_solve(A, b_tensor)
         except ImportError:
             print("MUMPS not installed, falling back")
-            field_tensor = torch.vmap(
-                TorchMatSolver.apply,
-                in_dims=(None, 0, None),
-            )(A, b_tensor, lambda A, b: sparse.linalg.spsolve(A, b))
+            field_tensor = batched_sparse_solve(A, b_tensor)
 
         for i, src in enumerate(sources):
             # Store field for each source

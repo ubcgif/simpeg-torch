@@ -11,11 +11,7 @@ from simpegtorch.electromagnetics.resistivity import (
     RxDipole,
     Survey,
 )
-from simpegtorch.electromagnetics.utils import (
-    apparent_resistivity_from_voltage,
-    pseudo_locations,
-    plot_pseudosection,
-)
+
 from simpegtorch.utils import (
     get_indices_sphere,
     active_from_xyz,
@@ -148,50 +144,59 @@ true_model = active_mapping.forward(active_model)
 sim = Simulation3DNodal(mesh, survey=survey)
 dpred_reference = sim.dpred(true_model)
 
+# Ensure gradients are turned off for dpred_reference
+dpred_reference = dpred_reference.detach()
+
 print(f"Survey: {len(sources)} sources, {survey.nD} total data points")
-print(f"Reference data range: {dpred_reference.min():.2e} to {dpred_reference.max():.2e} V")
+print(
+    f"Reference data range: {dpred_reference.min():.2e} to {dpred_reference.max():.2e} V"
+)
 
 # =============================================================================
 # Set up inversion with PyTorch module
 # =============================================================================
 
+
 class ForwardDCSim(nn.Module):
     def __init__(self, mesh, survey, starting_model, active_mapping):
         super().__init__()
         # Model parameters to optimize
-        self.inferred_model = nn.Parameter(starting_model.clone())
+        self.inferred_model = nn.Parameter(starting_model.clone(), requires_grad=True)
         self.starting_model = nn.Parameter(starting_model.clone(), requires_grad=False)
         self.simulation = Simulation3DNodal(mesh, survey=survey)
         self.active_mapping = active_mapping
-        self.alpha = 0.01  # Regularization parameter
-    
+        self.alpha = 0.0  # Regularization parameter
+
     def forward(self, dpred_reference):
         # Map active model to full mesh
         full_model = self.active_mapping.forward(self.inferred_model)
-        
+
         # Compute predicted data
         dpred = self.simulation.dpred(full_model)
-        
+
         # Data misfit
         loss_data = torch.nn.functional.mse_loss(dpred, dpred_reference)
-        
+
         # Model regularization (smoothness)
-        loss_model = torch.nn.functional.mse_loss(self.inferred_model, self.starting_model)
-        
+        loss_model = torch.nn.functional.mse_loss(
+            self.inferred_model, self.starting_model
+        )
+
         return loss_data + self.alpha * loss_model, loss_data, loss_model
+
 
 # =============================================================================
 # Run inversion with Adam optimizer
 # =============================================================================
 
 # Create starting model (homogeneous background)
-starting_model = torch.full((n_active,), background_resistivity, dtype=torch.float64)
+starting_model = torch.full((n_active,), 100.0, dtype=torch.float64)
 
 # Create forward simulation module
 forward_sim = ForwardDCSim(mesh, survey, starting_model, active_mapping)
 
 # Set up Adam optimizer
-optimizer = torch.optim.Adam(forward_sim.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(forward_sim.parameters(), lr=1.0)
 
 # Inversion parameters
 n_iterations = 200
@@ -200,32 +205,63 @@ data_loss_history = []
 model_loss_history = []
 
 print(f"\nStarting inversion with {n_iterations} iterations...")
-print("Iter | Total Loss | Data Loss | Model Loss")
-print("-" * 45)
+print("Iter | Total Loss | Data Loss | Model Loss | Grad Norm | Model Norm")
+print("-" * 75)
+
+# Plot the reference data and starting model
+fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+
+# Plot reference data
+ax1 = axes[0]
+ax1.plot(dpred_reference.cpu(), "b-", label="Reference Data")
+ax1.set_title("Reference Data")
+ax1.set_xlabel("Data Index")
+ax1.set_ylabel("Voltage (V)")
+ax1.legend()
+ax1.grid(True)
+
+dpred_prior = sim.dpred(active_mapping.forward(starting_model))
+
+# Plot starting model
+ax2 = axes[1]
+ax2.plot(dpred_prior.detach().cpu(), "r-", label="Starting Model")
+ax2.set_title("Prior data distributions")
+ax2.set_xlabel("Data Index")
+ax2.set_ylabel("Voltage (V)")
+ax2.legend()
+ax2.grid(True)
+
+plt.tight_layout()
+plt.show()
 
 for iteration in range(n_iterations):
     # Zero gradients
     optimizer.zero_grad()
-    
+
     # Forward pass
     total_loss, data_loss, model_loss = forward_sim(dpred_reference)
-    
+
     # Backward pass
     total_loss.backward()
-    
+
     # Update parameters
     optimizer.step()
-    
+
     # Store loss values
     loss_history.append(total_loss.item())
     data_loss_history.append(data_loss.item())
     model_loss_history.append(model_loss.item())
-    
+
     # Print progress
     if iteration % 20 == 0 or iteration == n_iterations - 1:
-        print(f"{iteration:4d} | {total_loss.item():.2e} | {data_loss.item():.2e} | {model_loss.item():.2e}")
+        # Check gradient norms
+        grad_norm = torch.norm(forward_sim.inferred_model.grad).item()
+        model_norm = torch.norm(forward_sim.inferred_model).item()
+        print(
+            f"{iteration:4d} | {total_loss.item():.2e} | {data_loss.item():.2e} | {model_loss.item():.2e} | grad_norm: {grad_norm:.2e} | model_norm: {model_norm:.2e}"
+        )
 
-print(f"\nInversion completed!")
+print("\nInversion completed!")
 print(f"Final data loss: {data_loss_history[-1]:.2e}")
 print(f"Final model loss: {model_loss_history[-1]:.2e}")
 
@@ -237,17 +273,17 @@ print(f"Final model loss: {model_loss_history[-1]:.2e}")
 inverted_model = forward_sim.inferred_model.detach().clone()
 
 # Create figure with multiple subplots
-fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+fig, axes = plt.subplots(2, 3, figsize=(20, 12))
 
 # Plot 1: Loss history
 ax1 = axes[0, 0]
 iterations = range(len(loss_history))
-ax1.semilogy(iterations, loss_history, 'b-', label='Total Loss')
-ax1.semilogy(iterations, data_loss_history, 'r-', label='Data Loss')
-ax1.semilogy(iterations, model_loss_history, 'g-', label='Model Loss')
-ax1.set_xlabel('Iteration')
-ax1.set_ylabel('Loss')
-ax1.set_title('Inversion Loss History')
+ax1.semilogy(iterations, loss_history, "b-", label="Total Loss")
+ax1.semilogy(iterations, data_loss_history, "r-", label="Data Loss")
+ax1.semilogy(iterations, model_loss_history, "g-", label="Model Loss")
+ax1.set_xlabel("Iteration")
+ax1.set_ylabel("Loss")
+ax1.set_title("Inversion Loss History")
 ax1.legend()
 ax1.grid(True)
 
@@ -258,41 +294,113 @@ y_slice_idx = ny // 2
 true_model_2d = true_model.reshape(nx, ny, nz)[:, y_slice_idx, :]
 x_coords = mesh.nodes_x[:-1] + mesh.h[0] / 2
 z_coords = mesh.nodes_z[:-1] + mesh.h[2] / 2
-X, Z = torch.meshgrid(x_coords, z_coords, indexing='ij')
+X, Z = torch.meshgrid(x_coords, z_coords, indexing="ij")
 
-im2 = ax2.pcolormesh(X.cpu(), Z.cpu(), true_model_2d.cpu(), 
-                     norm=LogNorm(vmin=10, vmax=1000), cmap='viridis')
-ax2.set_xlabel('X (m)')
-ax2.set_ylabel('Z (m)')
-ax2.set_title('True Model (y=0 slice)')
-ax2.set_aspect('equal')
-plt.colorbar(im2, ax=ax2, label='Resistivity (Ω⋅m)')
+im2 = ax2.pcolormesh(
+    X.cpu(),
+    Z.cpu(),
+    true_model_2d.cpu(),
+    norm=LogNorm(vmin=10, vmax=1000),
+    cmap="viridis",
+)
+ax2.set_xlabel("X (m)")
+ax2.set_ylabel("Z (m)")
+ax2.set_title("True Model (y=0 slice)")
+ax2.set_aspect("equal")
+plt.colorbar(im2, ax=ax2, label="Resistivity (Ω⋅m)")
 
 # Plot 3: Inverted model cross-section
 ax3 = axes[1, 0]
 inverted_full = active_mapping.forward(inverted_model)
 inverted_model_2d = inverted_full.reshape(nx, ny, nz)[:, y_slice_idx, :]
 
-im3 = ax3.pcolormesh(X.cpu(), Z.cpu(), inverted_model_2d.cpu(), 
-                     norm=LogNorm(vmin=10, vmax=1000), cmap='viridis')
-ax3.set_xlabel('X (m)')
-ax3.set_ylabel('Z (m)')
-ax3.set_title('Inverted Model (y=0 slice)')
-ax3.set_aspect('equal')
-plt.colorbar(im3, ax=ax3, label='Resistivity (Ω⋅m)')
+im3 = ax3.pcolormesh(
+    X.cpu(),
+    Z.cpu(),
+    inverted_model_2d.cpu(),
+    norm=LogNorm(vmin=10, vmax=1000),
+    cmap="viridis",
+)
+ax3.set_xlabel("X (m)")
+ax3.set_ylabel("Z (m)")
+ax3.set_title("Inverted Model (y=0 slice)")
+ax3.set_aspect("equal")
+plt.colorbar(im3, ax=ax3, label="Resistivity (Ω⋅m)")
 
-# Plot 4: Data fit comparison
+# Plot 4: Anomaly profile through Y-slices
 ax4 = axes[1, 1]
+# Create anomaly profile showing most anomalous value for each Y slice
+background_rho = 100.0  # Background resistivity
+
+# For true model
+true_full = true_model.reshape(nx, ny, nz)
+anomaly_profile_true = []
+for y_idx in range(ny):
+    y_slice = true_full[:, y_idx, :]
+    # Find most anomalous value (furthest from background)
+    deviation = torch.abs(y_slice - background_rho)
+    max_deviation_idx = torch.argmax(deviation)
+    most_anomalous_value = y_slice.flatten()[max_deviation_idx]
+    anomaly_profile_true.append(most_anomalous_value.item())
+
+# For inverted model
+inverted_full = active_mapping.forward(inverted_model)
+inverted_full_reshaped = inverted_full.reshape(nx, ny, nz)
+anomaly_profile_inv = []
+for y_idx in range(ny):
+    y_slice = inverted_full_reshaped[:, y_idx, :]
+    # Find most anomalous value (furthest from background)
+    deviation = torch.abs(y_slice - background_rho)
+    max_deviation_idx = torch.argmax(deviation)
+    most_anomalous_value = y_slice.flatten()[max_deviation_idx]
+    anomaly_profile_inv.append(most_anomalous_value.item())
+
+# Y coordinates for plotting
+y_centers = mesh.cell_centers_y.cpu().numpy()
+
+# Plot anomaly profiles
+ax4.plot(y_centers, anomaly_profile_true, "b-", linewidth=2, label="True Model")
+ax4.plot(y_centers, anomaly_profile_inv, "r--", linewidth=2, label="Inverted Model")
+ax4.axhline(y=background_rho, color="k", linestyle=":", alpha=0.5, label="Background")
+ax4.set_xlabel("Y (m)")
+ax4.set_ylabel("Most Anomalous Resistivity (Ω⋅m)")
+ax4.set_title("Anomaly Profile Through Y-Slices")
+ax4.legend()
+ax4.grid(True, alpha=0.3)
+
+# Plot 5: Data fit comparison
+ax5 = axes[1, 2]
 final_dpred = forward_sim.simulation.dpred(active_mapping.forward(inverted_model))
-ax4.loglog(torch.abs(dpred_reference).cpu(), torch.abs(final_dpred.detach()).cpu(), 'bo', alpha=0.6)
+ax5.loglog(
+    torch.abs(dpred_reference).cpu(),
+    torch.abs(final_dpred.detach()).cpu(),
+    "bo",
+    alpha=0.6,
+)
 data_min = min(torch.abs(dpred_reference).min(), torch.abs(final_dpred.detach()).min())
 data_max = max(torch.abs(dpred_reference).max(), torch.abs(final_dpred.detach()).max())
-ax4.loglog([data_min, data_max], [data_min, data_max], 'r--', label='Perfect fit')
-ax4.set_xlabel('True Data (V)')
-ax4.set_ylabel('Predicted Data (V)')
-ax4.set_title('Data Fit')
-ax4.legend()
-ax4.grid(True)
+ax5.loglog([data_min, data_max], [data_min, data_max], "r--", label="Perfect fit")
+ax5.set_xlabel("True Data (V)")
+ax5.set_ylabel("Predicted Data (V)")
+ax5.set_title("Data Fit")
+ax5.legend()
+ax5.grid(True)
+
+# Plot 6: Model comparison scatter plot
+ax6 = axes[0, 2]
+ax6.scatter(
+    active_model.detach().cpu().numpy(),
+    inverted_model.detach().cpu().numpy(),
+    alpha=0.5,
+)
+ax6.plot([10, 1000], [10, 1000], "r--", label="Perfect fit")
+ax6.set_xlabel("True Resistivity (Ω⋅m)")
+ax6.set_ylabel("Inverted Resistivity (Ω⋅m)")
+ax6.set_title("Model Comparison")
+ax6.legend()
+ax6.grid(True)
+ax6.set_xscale("log")
+ax6.set_yscale("log")
 
 plt.tight_layout()
 plt.show()
@@ -301,18 +409,22 @@ plt.show()
 # Print summary statistics
 # =============================================================================
 
-print(f"\n" + "="*60)
 print("INVERSION SUMMARY")
-print("="*60)
+print("=" * 60)
 print(f"Number of active cells: {n_active}")
 print(f"Number of data points: {survey.nD}")
 print(f"Number of iterations: {n_iterations}")
-print(f"Final data RMS: {torch.sqrt(torch.mean((dpred_reference - final_dpred.detach())**2)):.2e}")
+print(
+    f"Final data RMS: {torch.sqrt(torch.mean((dpred_reference - final_dpred.detach())**2)):.2e}"
+)
 print(f"Data fit improvement: {data_loss_history[0]/data_loss_history[-1]:.1f}x")
 
 # Model statistics
 true_active = active_model
 print(f"\nTrue model range: {true_active.min():.1f} - {true_active.max():.1f} Ω⋅m")
-print(f"Inverted model range: {inverted_model.min():.1f} - {inverted_model.max():.1f} Ω⋅m")
-print(f"Model RMS error: {torch.sqrt(torch.mean((true_active - inverted_model)**2)):.1f} Ω⋅m")
-
+print(
+    f"Inverted model range: {inverted_model.min():.1f} - {inverted_model.max():.1f} Ω⋅m"
+)
+print(
+    f"Model RMS error: {torch.sqrt(torch.mean((true_active - inverted_model)**2)):.1f} Ω⋅m"
+)

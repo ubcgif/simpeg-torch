@@ -310,12 +310,12 @@ class Dipole(BaseRx):
 
         # Convert to tensors and validate shapes
         if isinstance(locations[0], torch.Tensor):
-            loc_m = locations[0].clone().detach().to(torch.float64)
+            loc_m = locations[0].clone().to(torch.float64)
         else:
             loc_m = torch.tensor(locations[0], dtype=torch.float64)
 
         if isinstance(locations[1], torch.Tensor):
-            loc_n = locations[1].clone().detach().to(torch.float64)
+            loc_n = locations[1].clone().to(torch.float64)
         else:
             loc_n = torch.tensor(locations[1], dtype=torch.float64)
 

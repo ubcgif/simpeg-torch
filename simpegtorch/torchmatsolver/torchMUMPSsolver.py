@@ -113,7 +113,7 @@ class TorchMUMPSsolver(Function):
             mumps_solver = Mumps(A_np_csc)
 
             # Convert all RHS vectors to numpy and solve in batch
-            b_np = b.cpu().detach().numpy()  # Shape: (batch_size, n)
+            b_np = b.detach().cpu().numpy()  # Shape: (batch_size, n)
 
             # Solve for all RHS vectors at once using MUMPS multiple RHS capability
             x_np = mumps_solver.solve(b_np.T)  # Transpose for column-major multiple RHS
@@ -126,7 +126,7 @@ class TorchMUMPSsolver(Function):
             else:
                 # Multiple RHS case
                 x = torch.tensor(
-                    x_np.T, dtype=b.dtype, device=b.device
+                    x_np.T, dtype=b.dtype, device=b.device, requires_grad=True
                 )  # Transpose back
                 return x, 0
 

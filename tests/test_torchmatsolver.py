@@ -2,7 +2,11 @@ import torch
 import pytest
 import numpy as np
 from scipy import sparse
-from simpegtorch.torchmatsolver import TorchMatSolver, TorchMUMPSsolver
+from simpegtorch.torchmatsolver import (
+    TorchMatSolver,
+    TorchMUMPSsolver,
+    torchMUMPSsolver_batched,
+)
 
 torch.set_default_dtype(torch.float64)
 
@@ -319,8 +323,10 @@ def test_gradient_correctness_A(simple_system):
 # Skip all MUMPS tests if MUMPS is not available
 try:
     from pymatsolver import Mumps
+
     # Test if MUMPS is actually available by checking for the python-mumps package
     import scipy.sparse
+
     test_matrix = scipy.sparse.csc_matrix([[1.0, 0.0], [0.0, 1.0]])
     Mumps(test_matrix)  # This will fail if python-mumps is not installed
     mumps_available = True
@@ -384,6 +390,7 @@ def test_mumps_gradient_computation_b(simple_system):
 
     # Gradient should be finite
     assert torch.all(torch.isfinite(b_torch.grad))
+    assert torch.any(b_torch.grad > 0)
 
 
 @skip_mumps
@@ -406,6 +413,7 @@ def test_mumps_gradient_computation_A(simple_system):
 
     # Gradient should be finite (check dense values)
     assert torch.all(torch.isfinite(A_torch.grad.to_dense()))
+    assert torch.any(torch.isfinite(A_torch.grad.to_dense()) > 0)
 
 
 @skip_mumps
@@ -462,6 +470,9 @@ def test_mumps_vmap():
         lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0)
     )(A, b_batched)
 
+    loss = torch.sum(x_batched_rhs**2)  # Simple quadratic loss
+    loss.backward()
+
     # test batching over only A
     x_batched_A = torch.vmap(
         lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(0, None)
@@ -470,6 +481,29 @@ def test_mumps_vmap():
     assert x_batched.shape == (3, 2)  # Should return a batch of solutions
     assert x_batched_rhs.shape == (3, 2)  # Should return a batch of solutions
     assert x_batched_A.shape == (3, 2)  # Should return a batch of solutions
+
+
+@skip_mumps
+def test_mumps_batched():
+    """Tests batching with vmap functionality using MUMPS"""
+    # Create a well-conditioned sparse system
+    indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
+    values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
+    A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
+    b = torch.tensor([11.0, 11.0], requires_grad=True)
+
+    b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
+
+    # test batching over only rhs (optimized case)
+    x_batched_rhs = torchMUMPSsolver_batched.batched_mumps_solve(A, b_batched)
+
+    loss = torch.sum(x_batched_rhs**2)  # Simple quadratic loss
+    loss.backward()
+
+    print(values.grad)
+
+    assert values.grad is not None
+    assert values.grad.shape == values.shape
 
 
 @skip_mumps
@@ -590,33 +624,35 @@ def test_mumps_batched_rhs_optimization():
     # Create a larger system to make the optimization more apparent
     n = 100
     np.random.seed(42)
-    
+
     # Create a sparse symmetric positive definite matrix
     A_dense = np.random.rand(n, n)
     A_dense = A_dense + A_dense.T + n * np.eye(n)  # Make symmetric positive definite
-    
+
     # Convert to sparse COO format for torch
     A_sparse = sparse.csc_matrix(A_dense).tocoo()
     indices = torch.tensor([A_sparse.row, A_sparse.col], dtype=torch.long)
     values = torch.tensor(A_sparse.data, dtype=torch.float64)
     A_torch = torch.sparse_coo_tensor(indices, values, (n, n), dtype=torch.float64)
-    
+
     # Create multiple RHS vectors
     num_rhs = 10
     b_batch = torch.randn(num_rhs, n, dtype=torch.float64)
-    
+
     # Test the batched RHS optimization
-    x_batch = torch.vmap(
-        lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0)
-    )(A_torch, b_batch)
-    
+    x_batch = torch.vmap(lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0))(
+        A_torch, b_batch
+    )
+
     # Verify solution correctness
     assert x_batch.shape == (num_rhs, n)
-    
+
     # Check that each solution is correct
     A_dense_torch = torch.tensor(A_dense, dtype=torch.float64)
     for i in range(num_rhs):
         residual = torch.norm(A_dense_torch @ x_batch[i] - b_batch[i])
         assert residual < 1e-10, f"RHS {i} residual too large: {residual.item():.2e}"
-    
-    print(f"Batched RHS optimization test passed: {num_rhs} RHS vectors solved efficiently")
+
+    print(
+        f"Batched RHS optimization test passed: {num_rhs} RHS vectors solved efficiently"
+    )

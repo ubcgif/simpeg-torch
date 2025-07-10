@@ -175,8 +175,15 @@ class BaseSrc:
         # This is similar to original SimPEG's approach
         interpolation_matrix = mesh.get_interpolation_matrix(
             self.location, location_type="N"
-        ).to_dense()
-        q = torch.sum(self.current.unsqueeze(1) * interpolation_matrix, dim=0)
+        )
+        # Use sparse matrix multiplication to preserve gradients
+        # interpolation_matrix is (n_electrodes, n_nodes)
+        # self.current is (n_electrodes,)
+        # We need to compute current^T @ interpolation_matrix
+        current_expanded = self.current.unsqueeze(0)  # (1, n_electrodes)
+        q = torch.sparse.mm(current_expanded, interpolation_matrix).squeeze(
+            0
+        )  # (n_nodes,)
 
         return q
 
@@ -263,12 +270,12 @@ class Dipole(BaseSrc):
 
         # Convert to tensors
         if isinstance(location[0], torch.Tensor):
-            loc_a = location[0].clone().detach().to(torch.float64)
+            loc_a = location[0].clone().to(torch.float64)
         else:
             loc_a = torch.tensor(location[0], dtype=torch.float64)
 
         if isinstance(location[1], torch.Tensor):
-            loc_b = location[1].clone().detach().to(torch.float64)
+            loc_b = location[1].clone().to(torch.float64)
         else:
             loc_b = torch.tensor(location[1], dtype=torch.float64)
 

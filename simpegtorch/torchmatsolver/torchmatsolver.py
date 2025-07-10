@@ -112,8 +112,8 @@ class TorchMatSolver(Function):
         A_np_csc = torch_tensor_to_sp(A, sp_type="csc")
         grad_b_np = solve_fn(A_np_csc, grad_output.cpu().numpy())
 
-        grad_b = torch.tensor(
-            grad_b_np, dtype=grad_output.dtype, device=grad_output.device
+        grad_b = torch.from_numpy(grad_b_np).to(
+            dtype=grad_output.dtype, device=grad_output.device
         )
 
         if needs_grad_A:
