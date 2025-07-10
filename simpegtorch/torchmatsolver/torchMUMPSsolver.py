@@ -10,155 +10,151 @@ except ImportError:
     _mumps_available = False
 
 ## This is a wrapper for pymatsolver MUMPS solver to use with torch tensors.
-# It will also compute the gradient of the solution for backpropoagation
+# It natively supports batching multiple RHS vectors with proper gradient computation
 
 
 class TorchMUMPSsolver(Function):
     @staticmethod
-    def forward(A, b):
+    def forward(ctx, A, b):
         """
         Forward pass to solve Ax = b using pymatsolver MUMPS solver.
+        Natively supports batching multiple RHS vectors.
+
+        Parameters:
+        -----------
+        A : torch.Tensor
+            Sparse matrix (n x n)
+        b : torch.Tensor
+            RHS vector(s) - can be (n,) for single RHS or (batch_size, n) for multiple RHS
+
+        Returns:
+        --------
+        x : torch.Tensor
+            Solution vector(s) - same shape as b
         """
         if not _mumps_available:
             raise ImportError(
                 "pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps"
             )
 
+        # Convert A to sparse CSC format once
         A_np_csc = torch_tensor_to_sp(A, sp_type="csc")
 
-        # Create MUMPS solver instance
+        # Create MUMPS solver instance and factor once
         mumps_solver = Mumps(A_np_csc)
 
-        # Solve the system
-        x = mumps_solver.solve(b.cpu().numpy())
-
-        return torch.tensor(x, dtype=b.dtype, device=b.device)
-
-    @staticmethod
-    def setup_context(ctx, inputs, output):
-        """
-        Setup context for the backward pass.
-        """
-        A, b = inputs
-        x = output
-        ctx.save_for_backward(A, b, x)
-
-        # Ensure A and b are tensors
-        if not isinstance(A, torch.Tensor) or not isinstance(b, torch.Tensor):
-            raise TypeError("Inputs A and b must be torch tensors.")
-
-        # Check if A is a sparse tensor
-        if not (A.is_sparse or A.is_sparse_csr):
-            raise TypeError("Input A must be a torch sparse COO or CSR tensor.")
-
-    @staticmethod
-    def vmap(_info, in_dims, A, b):
-        """
-        Vectorized map function to handle multiple inputs.
-        Optimized batching using single factorization for multiple RHS vectors.
-        """
-        A_bdim, b_bdim = in_dims
-
-        # Determine batch size from the batched dimension
-        if A_bdim is not None:
-            batch_size = A.shape[A_bdim]
-        elif b_bdim is not None:
-            batch_size = b.shape[b_bdim]
+        # Handle both single and batched RHS
+        if b.ndim == 1:
+            # Single RHS vector
+            b_np = b.cpu().numpy()
+            x_np = mumps_solver.solve(b_np)
+            x = torch.from_numpy(x_np).to(dtype=b.dtype, device=b.device)
         else:
-            # No batching needed
-            return TorchMUMPSsolver.apply(A, b), 0
+            # Multiple RHS vectors (batch_size, n)
+            b_np = b.cpu().numpy()
 
-        # Handle different batching scenarios
-        if A_bdim is not None and b_bdim is not None:
-            # Both A and b are batched
-            if A_bdim != 0 or b_bdim != 0:
-                raise NotImplementedError("Only batching on dimension 0 is supported")
+            # MUMPS expects column-major format for multiple RHS
+            x_np = mumps_solver.solve(b_np.T)  # Transpose for column-major
 
-            results = []
-            for i in range(batch_size):
-                A_i = A[i]  # Extract i-th matrix
-                b_i = b[i]  # Extract i-th vector
-                x_i = TorchMUMPSsolver.apply(A_i, b_i)
-                results.append(x_i)
-
-            return torch.stack(results, dim=0), 0
-
-        elif A_bdim is not None:
-            # Only A is batched, b is broadcast
-            if A_bdim != 0:
-                raise NotImplementedError("Only batching on dimension 0 is supported")
-
-            results = []
-            for i in range(batch_size):
-                A_i = A[i]  # Extract i-th matrix
-                x_i = TorchMUMPSsolver.apply(A_i, b)
-                results.append(x_i)
-
-            return torch.stack(results, dim=0), 0
-
-        elif b_bdim is not None:
-            # Only b is batched, A is broadcast - OPTIMIZED FOR MULTIPLE RHS
-            if b_bdim != 0:
-                raise NotImplementedError("Only batching on dimension 0 is supported")
-
-            if not _mumps_available:
-                raise ImportError(
-                    "pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps"
-                )
-
-            # Convert A to sparse CSC format once
-            A_np_csc = torch_tensor_to_sp(A, sp_type="csc")
-
-            # Create MUMPS solver instance and factor once
-            mumps_solver = Mumps(A_np_csc)
-
-            # Convert all RHS vectors to numpy and solve in batch
-            b_np = b.detach().cpu().numpy()  # Shape: (batch_size, n)
-
-            # Solve for all RHS vectors at once using MUMPS multiple RHS capability
-            x_np = mumps_solver.solve(b_np.T)  # Transpose for column-major multiple RHS
-
-            # Convert back to torch tensor
             if x_np.ndim == 1:
-                # Single RHS case
-                x = torch.tensor(x_np, dtype=b.dtype, device=b.device)
-                return x.unsqueeze(0), 0
+                # Single RHS case (batch_size=1)
+                x = (
+                    torch.from_numpy(x_np)
+                    .to(dtype=b.dtype, device=b.device)
+                    .unsqueeze(0)
+                )
             else:
-                # Multiple RHS case
-                x = torch.tensor(
-                    x_np.T, dtype=b.dtype, device=b.device, requires_grad=True
-                )  # Transpose back
-                return x, 0
+                # Multiple RHS case - transpose back to (batch_size, n)
+                x = torch.from_numpy(x_np.T).to(dtype=b.dtype, device=b.device)
+
+        # Save tensors for backward pass
+        ctx.save_for_backward(A, b, x)
+        ctx.mumps_solver = mumps_solver  # Store solver in context for reuse
+        ctx.needs_grad_A = A.requires_grad
+        ctx.needs_grad_b = b.requires_grad
+
+        return x
 
     @staticmethod
     def backward(ctx, grad_output):
         """
-        Backward pass to compute the gradient of the solution.
-        For symmetric sparse matrices A, we have A^T = A.
+        Backward pass to compute gradients for batched operations.
+
+        For the equation Ax = b, we have:
+        - grad_b = A^{-1} * grad_output  (since A is symmetric)
+        - grad_A = -grad_b * x^T  (if A requires gradients)
         """
-        A, _b, x = ctx.saved_tensors
+        A, b, x = ctx.saved_tensors
+        mumps_solver = ctx.mumps_solver  # Retrieve saved solver from context
         grad_A = None
         grad_b = None
-
-        needs_grad_A, _ = ctx.needs_input_grad
 
         if not _mumps_available:
             raise ImportError(
                 "pymatsolver with MUMPS support is required. Install with: conda install -c conda-forge python-mumps"
             )
 
-        # Compute the gradient of the solution with respect to b
-        # grad_b = A^{-1} * grad_output (since A is symmetric)
-        A_np_csc = torch_tensor_to_sp(A, sp_type="csc")
-        mumps_solver = Mumps(A_np_csc)
-        grad_b_np = mumps_solver.solve(grad_output.cpu().numpy())
+        # Compute grad_b = A^{-1} * grad_output
+        if grad_output.ndim == 1:
+            # Single RHS gradient
+            grad_output_np = grad_output.cpu().numpy()
+            grad_b_np = mumps_solver.solve(grad_output_np)
+            grad_b = torch.from_numpy(grad_b_np).to(
+                dtype=grad_output.dtype, device=grad_output.device
+            )
+        else:
+            # Multiple RHS gradients (batch_size, n)
+            grad_output_np = grad_output.cpu().numpy()
 
-        grad_b = torch.tensor(
-            grad_b_np, dtype=grad_output.dtype, device=grad_output.device
-        )
+            # MUMPS expects column-major format
+            grad_b_np = mumps_solver.solve(grad_output_np.T)
 
-        if needs_grad_A:
-            # grad_A =  -(A_inv^T * grad_x) * x^T
-            grad_A = -sparsified_outer(A, grad_b, x)
+            if grad_b_np.ndim == 1:
+                # Single RHS case
+                grad_b = (
+                    torch.from_numpy(grad_b_np)
+                    .to(dtype=grad_output.dtype, device=grad_output.device)
+                    .unsqueeze(0)
+                )
+            else:
+                # Multiple RHS case - transpose back
+                grad_b = torch.from_numpy(grad_b_np.T).to(
+                    dtype=grad_output.dtype, device=grad_output.device
+                )
+
+        if ctx.needs_grad_A:
+            # Compute grad_A = -grad_b * x^T
+            # For batched operations, we need to sum over the batch dimension
+            if grad_b.ndim == 1 and x.ndim == 1:
+                # Single RHS case
+                grad_A = -sparsified_outer(A, grad_b, x)
+            else:
+                # Batched case - sum gradients across batch dimension
+                grad_A = None
+                for i in range(grad_b.shape[0]):
+                    grad_A_i = -sparsified_outer(A, grad_b[i], x[i])
+                    if grad_A is None:
+                        grad_A = grad_A_i
+                    else:
+                        grad_A = grad_A + grad_A_i
 
         return grad_A, grad_b
+
+
+def batched_mumps_solve(A, b):
+    """
+    Convenient wrapper function for batched MUMPS solving.
+
+    Parameters:
+    -----------
+    A : torch.Tensor
+        Sparse matrix (n x n)
+    b : torch.Tensor
+        RHS vector(s) - can be (n,) for single RHS or (batch_size, n) for multiple RHS
+
+    Returns:
+    --------
+    x : torch.Tensor
+        Solution vector(s) - same shape as b
+    """
+    return TorchMUMPSsolver.apply(A, b)

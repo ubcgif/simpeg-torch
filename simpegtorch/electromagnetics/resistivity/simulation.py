@@ -1,6 +1,5 @@
 import torch
-from simpegtorch.torchmatsolver.torchMUMPSsolver_batched import batched_mumps_solve
-from simpegtorch.torchmatsolver.torchmatsolver_batched import batched_sparse_solve
+from simpegtorch.torchmatsolver import batched_mumps_solve, batched_sparse_solve
 
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.discretize.utils import sdiag

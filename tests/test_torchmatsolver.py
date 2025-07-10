@@ -5,7 +5,8 @@ from scipy import sparse
 from simpegtorch.torchmatsolver import (
     TorchMatSolver,
     TorchMUMPSsolver,
-    torchMUMPSsolver_batched,
+    batched_sparse_solve,
+    batched_mumps_solve,
 )
 
 torch.set_default_dtype(torch.float64)
@@ -49,12 +50,8 @@ def test_forward_solve_sparse(simple_system):
     """Test forward solve with sparse matrix using scipy sparse solver"""
     A_torch, b_torch, A_sparse, b_np = simple_system
 
-    # Define solve function using scipy sparse solver
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
-    # Solve using TorchMatSolver
-    x = TorchMatSolver.apply(A_torch, b_torch, solve_fn)
+    # Solve using TorchMatSolver (now batched by default)
+    x = TorchMatSolver.apply(A_torch, b_torch)
 
     # Compare with direct sparse solution
     x_expected = sparse.linalg.spsolve(A_sparse, b_np)
@@ -73,12 +70,8 @@ def test_forward_solve_csr_sparse(sparse_system):
     A_torch_csr = A_torch.to_sparse_csr()
     A_torch_csr.requires_grad_(True)
 
-    # Define solve function using scipy sparse solver
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
-    # Solve using TorchMatSolver
-    x = TorchMatSolver.apply(A_torch_csr, b_torch, solve_fn)
+    # Solve using TorchMatSolver (now batched by default)
+    x = TorchMatSolver.apply(A_torch_csr, b_torch)
 
     # Compare with direct sparse solution
     x_expected = sparse.linalg.spsolve(A_sparse, b_np)
@@ -93,11 +86,8 @@ def test_gradient_computation_b(simple_system):
     """Test gradient computation with respect to b for sparse matrices"""
     A_torch, b_torch, A_sparse, b_np = simple_system
 
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
     # Solve and compute gradients
-    x = TorchMatSolver.apply(A_torch, b_torch, solve_fn)
+    x = TorchMatSolver.apply(A_torch, b_torch)
     loss = torch.sum(x**2)  # Simple quadratic loss
     loss.backward()
 
@@ -113,14 +103,11 @@ def test_gradient_computation_A(simple_system):
     """Test gradient computation with respect to sparse A"""
     A_torch, b_torch, A_sparse, b_np = simple_system
 
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
     # Enable gradient retention for non-leaf tensor
     A_torch.retain_grad()
 
     # Solve and compute gradients
-    x = TorchMatSolver.apply(A_torch, b_torch, solve_fn)
+    x = TorchMatSolver.apply(A_torch, b_torch)
     loss = torch.sum(x**2)  # Simple quadratic loss
     loss.backward()
 
@@ -141,10 +128,7 @@ def test_device_consistency():
     A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
     b = torch.tensor([1.0, 1.0], requires_grad=True)
 
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
-    x = TorchMatSolver.apply(A, b, solve_fn)
+    x = TorchMatSolver.apply(A, b)
 
     assert x.device == b.device
     assert x.dtype == b.dtype
@@ -158,49 +142,46 @@ def test_solve_accuracy():
     A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
     b = torch.tensor([11.0, 11.0], requires_grad=True)
 
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
-    x = TorchMatSolver.apply(A, b, solve_fn)
+    x = TorchMatSolver.apply(A, b)
 
     # Check that Ax ≈ b using dense multiplication
     residual = torch.sparse.mm(A, x.unsqueeze(1)).squeeze() - b
     assert torch.max(torch.abs(residual)) < 1e-10
 
 
-def test_vmap():
-    """Tests batching with vmap functionality"""
+def test_batched_functionality():
+    """Tests native batching functionality"""
     # Create a well-conditioned sparse system
     indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
     values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
     A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
     b = torch.tensor([11.0, 11.0], requires_grad=True)
-    A_b = A.unsqueeze(0)  # Add batch dimension
-    A_batched = torch.cat([A_b, A_b, A_b], dim=0)  # Batch of 3 identical matrices
-
+    
+    # Test single RHS
+    x_single = TorchMatSolver.apply(A, b)
+    assert x_single.shape == (2,)
+    
+    # Test batched RHS
     b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
-
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
-    # Use TorchMatSolver with vmap
-    x_batched = torch.vmap(lambda A, b: TorchMatSolver.apply(A, b, solve_fn))(
-        A_batched, b_batched
-    )
-
-    # test batching over only rhs
-    x_batched_rhs = torch.vmap(
-        lambda A, b: TorchMatSolver.apply(A, b, solve_fn), in_dims=(None, 0)
-    )(A, b_batched)
-
-    # test batching over only A
-    x_batched_A = torch.vmap(
-        lambda A, b: TorchMatSolver.apply(A, b, solve_fn), in_dims=(0, None)
-    )(A_batched, b)
-
+    x_batched = TorchMatSolver.apply(A, b_batched)
+    
     assert x_batched.shape == (3, 2)  # Should return a batch of solutions
-    assert x_batched_rhs.shape == (3, 2)  # Should return a batch of solutions
-    assert x_batched_A.shape == (3, 2)  # Should return a batch of solutions
+    
+    # Check that each solution is correct
+    for i in range(3):
+        np.testing.assert_allclose(x_batched[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10)
+        
+    # Test gradients work with batched RHS
+    A.retain_grad()
+    b_batched.retain_grad()
+    
+    x_batched_grad = TorchMatSolver.apply(A, b_batched)
+    loss = torch.sum(x_batched_grad**2)
+    loss.backward()
+    
+    assert A.grad is not None
+    assert b_batched.grad is not None
+    assert A.grad.is_sparse
 
 
 def test_large_sparse_matrix_efficiency():
@@ -246,11 +227,8 @@ def test_large_sparse_matrix_efficiency():
 
     b = torch.randn(n, dtype=torch.float64, requires_grad=True)
 
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
     # Solve and compute gradients
-    x = TorchMatSolver.apply(A, b, solve_fn)
+    x = TorchMatSolver.apply(A, b)
     loss = torch.sum(x**2)
     loss.backward()
 
@@ -282,12 +260,9 @@ def test_gradient_correctness_A(simple_system):
     """Test gradient correctness w.r.t A using finite differences"""
     A_torch, b_torch, A_sparse, b_np = simple_system
 
-    def solve_fn(A, b):
-        return sparse.linalg.spsolve(A, b)
-
     # Compute loss and gradients
     A_torch.retain_grad()
-    x = TorchMatSolver.apply(A_torch, b_torch, solve_fn)
+    x = TorchMatSolver.apply(A_torch, b_torch)
     loss = torch.sum(x**2)
     loss.backward()
 
@@ -303,13 +278,13 @@ def test_gradient_correctness_A(simple_system):
         values_plus = A_values.clone().detach()
         values_plus[i] += eps
         A_plus = torch.sparse_coo_tensor(A_indices, values_plus, A_torch.shape)
-        x_plus = TorchMatSolver.apply(A_plus, b_torch.detach(), solve_fn)
+        x_plus = TorchMatSolver.apply(A_plus, b_torch.detach())
         loss_plus = torch.sum(x_plus**2)
 
         values_minus = A_values.clone().detach()
         values_minus[i] -= eps
         A_minus = torch.sparse_coo_tensor(A_indices, values_minus, A_torch.shape)
-        x_minus = TorchMatSolver.apply(A_minus, b_torch.detach(), solve_fn)
+        x_minus = TorchMatSolver.apply(A_minus, b_torch.detach())
         loss_minus = torch.sum(x_minus**2)
 
         grad_fd = (loss_plus - loss_minus) / (2 * eps)
@@ -448,44 +423,44 @@ def test_mumps_solve_accuracy():
 
 
 @skip_mumps
-def test_mumps_vmap():
-    """Tests batching with vmap functionality using MUMPS"""
+def test_mumps_batched_functionality():
+    """Tests native batching functionality using MUMPS"""
     # Create a well-conditioned sparse system
     indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
     values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
     A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
     b = torch.tensor([11.0, 11.0], requires_grad=True)
-    A_b = A.unsqueeze(0)  # Add batch dimension
-    A_batched = torch.cat([A_b, A_b, A_b], dim=0)  # Batch of 3 identical matrices
-
+    
+    # Test single RHS
+    x_single = TorchMUMPSsolver.apply(A, b)
+    assert x_single.shape == (2,)
+    
+    # Test batched RHS
     b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
-
-    # Use TorchMUMPSsolver with vmap
-    x_batched = torch.vmap(lambda A, b: TorchMUMPSsolver.apply(A, b))(
-        A_batched, b_batched
-    )
-
-    # test batching over only rhs (optimized case)
-    x_batched_rhs = torch.vmap(
-        lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0)
-    )(A, b_batched)
-
-    loss = torch.sum(x_batched_rhs**2)  # Simple quadratic loss
-    loss.backward()
-
-    # test batching over only A
-    x_batched_A = torch.vmap(
-        lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(0, None)
-    )(A_batched, b)
-
+    x_batched = TorchMUMPSsolver.apply(A, b_batched)
+    
     assert x_batched.shape == (3, 2)  # Should return a batch of solutions
-    assert x_batched_rhs.shape == (3, 2)  # Should return a batch of solutions
-    assert x_batched_A.shape == (3, 2)  # Should return a batch of solutions
+    
+    # Check that each solution is correct
+    for i in range(3):
+        np.testing.assert_allclose(x_batched[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10)
+        
+    # Test gradients work with batched RHS
+    A.retain_grad()
+    b_batched.retain_grad()
+    
+    x_batched_grad = TorchMUMPSsolver.apply(A, b_batched)
+    loss = torch.sum(x_batched_grad**2)
+    loss.backward()
+    
+    assert A.grad is not None
+    assert b_batched.grad is not None
+    assert A.grad.is_sparse
 
 
 @skip_mumps
-def test_mumps_batched():
-    """Tests batching with vmap functionality using MUMPS"""
+def test_mumps_batched_convenience():
+    """Tests batching with convenience function using MUMPS"""
     # Create a well-conditioned sparse system
     indices = torch.tensor([[0, 0, 1, 1], [0, 1, 0, 1]], dtype=torch.long)
     values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
@@ -494,16 +469,15 @@ def test_mumps_batched():
 
     b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
 
-    # test batching over only rhs (optimized case)
-    x_batched_rhs = torchMUMPSsolver_batched.batched_mumps_solve(A, b_batched)
+    # test batching using convenience function
+    x_batched_rhs = batched_mumps_solve(A, b_batched)
 
     loss = torch.sum(x_batched_rhs**2)  # Simple quadratic loss
     loss.backward()
 
-    print(values.grad)
-
     assert values.grad is not None
     assert values.grad.shape == values.shape
+    assert x_batched_rhs.shape == (3, 2)
 
 
 @skip_mumps
@@ -639,10 +613,8 @@ def test_mumps_batched_rhs_optimization():
     num_rhs = 10
     b_batch = torch.randn(num_rhs, n, dtype=torch.float64)
 
-    # Test the batched RHS optimization
-    x_batch = torch.vmap(lambda A, b: TorchMUMPSsolver.apply(A, b), in_dims=(None, 0))(
-        A_torch, b_batch
-    )
+    # Test the batched RHS with native batching
+    x_batch = TorchMUMPSsolver.apply(A_torch, b_batch)
 
     # Verify solution correctness
     assert x_batch.shape == (num_rhs, n)
