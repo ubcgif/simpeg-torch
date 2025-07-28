@@ -8,7 +8,6 @@ leveraging automatic differentiation and GPU acceleration.
 import torch
 import numpy as np
 from typing import List, Optional, Union, Dict, Any
-from abc import ABC, abstractmethod
 
 
 class BaseInversion:
@@ -213,7 +212,7 @@ class BaseInvProblem:
         return self.optimizer_class([model], **self.optimizer_kwargs)
 
 
-class InversionDirective(ABC):
+class InversionDirective:
     """
     Base class for inversion directives.
 
@@ -226,17 +225,14 @@ class InversionDirective(ABC):
         self.inv_prob = None
         self.opt = None
 
-    @abstractmethod
     def initialize(self):
         """Called at start of inversion"""
         pass
 
-    @abstractmethod
     def endIter(self):
         """Called at end of each iteration"""
         pass
 
-    @abstractmethod
     def finish(self):
         """Called at end of inversion"""
         pass
