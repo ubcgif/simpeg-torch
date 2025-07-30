@@ -59,7 +59,7 @@ class BaseRegularization(nn.Module):
                 "active_cells", torch.ones(n_cells, dtype=torch.bool, device=device)
             )
 
-        # Set reference model
+        # Set reference model as a non-learned parameter
         if reference_model is not None:
             self.register_buffer(
                 "reference_model", reference_model.to(dtype=dtype, device=device)
