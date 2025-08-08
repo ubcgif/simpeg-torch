@@ -26,81 +26,8 @@ from simpegtorch.utils import (
 )
 
 
-class LogResistivityMapping(torch.nn.Module):
-    """
-    Log resistivity mapping using PyTorch autograd.
-
-    This creates a PyTorch module that maps from log-resistivity to full mesh resistivity
-    using automatic differentiation.
-
-    Parameters
-    ----------
-    active_mapping : InjectActiveCells
-        Mapping from active cells to full mesh
-    """
-
-    def __init__(self, active_mapping):
-        super().__init__()
-        self.active_mapping = active_mapping
-
-    def forward(self, log_resistivity):
-        """
-        Transform log-resistivity to resistivity and map to full mesh.
-
-        Parameters
-        ----------
-        log_resistivity : torch.Tensor
-            Log-resistivity values on active cells
-
-        Returns
-        -------
-        torch.Tensor
-            Resistivity values on full mesh
-        """
-        # Transform from log to linear resistivity (differentiable)
-        resistivity = torch.exp(log_resistivity)
-
-        # Map active cells to full mesh
-        full_resistivity = self.active_mapping.forward(resistivity)
-
-        return full_resistivity
-
-
-class LinearMapping(torch.nn.Module):
-    """
-    Simple resisivity mapping in linear space.
-
-    This is simply an identity mapping that passes the model through. Used for comparison.
-
-    Parameters
-    ----------
-    active_mapping : InjectActiveCells
-        Mapping from active cells to full mesh
-
-    """
-
-    def __init__(self, active_mapping):
-        super().__init__()
-        self.active_mapping = active_mapping
-
-    def forward(self, resistivity):
-        """
-        Transform resistivity values on active cells to full mesh.
-
-        Parameters
-        ----------
-        resistivity : torch.Tensor
-            Resistivity values on active cells
-
-        Returns
-        -------
-        torch.Tensor
-            Resistivity values on full mesh
-        """
-        # Map active cells to full mesh
-        full_resistivity = self.active_mapping.forward(resistivity)
-
-        return full_resistivity
+# Import mapping classes
+from simpegtorch.maps import LogMapping
 
 
 # Import our PyTorch inversion framework
@@ -290,7 +217,7 @@ def run_torch_dcr_inversion():
     simulation = Simulation3DNodal(mesh, survey=survey)
 
     # Create log resistivity mapping with PyTorch autograd
-    log_resistivity_mapping = LogResistivityMapping(active_mapping)
+    log_resistivity_mapping = LogMapping(active_mapping)
 
     # Data misfit with log resistivity mapping
     dmisfit = L2DataMisfit(
