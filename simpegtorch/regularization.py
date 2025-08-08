@@ -80,9 +80,9 @@ class BaseRegularization(nn.Module):
             self.register_buffer("grad_z", self.mesh.cell_gradient_z)
 
         # Volume weighting
-        if hasattr(self.mesh, "vol"):
+        if hasattr(self.mesh, "cell_volumes"):
             vol_sqrt = torch.sqrt(
-                self.mesh.vol.to(dtype=self.dtype, device=self.device)
+                self.mesh.cell_volumes.to(dtype=self.dtype, device=self.device)
             )
             self.register_buffer("vol_sqrt", vol_sqrt)
 
@@ -127,9 +127,9 @@ class Smallness(BaseRegularization):
             )
         else:
             # Use volume weighting by default
-            if hasattr(self.mesh, "vol"):
+            if hasattr(self.mesh, "cell_volumes"):
                 vol_sqrt = torch.sqrt(
-                    self.mesh.vol.to(dtype=self.dtype, device=self.device)
+                    self.mesh.cell_volumes.to(dtype=self.dtype, device=self.device)
                 )
                 self.register_buffer("weights", vol_sqrt)
             else:
@@ -204,9 +204,11 @@ class SmoothnessFirstOrder(BaseRegularization):
             )
 
         # Face volume weights (projected to faces)
-        if hasattr(self.mesh, "average_cell_to_face") and hasattr(self.mesh, "vol"):
+        if hasattr(self.mesh, "average_cell_to_face") and hasattr(
+            self.mesh, "cell_volumes"
+        ):
             # Use proper face volumes - average cell volumes to faces
-            mesh_vol = self.mesh.vol.to(dtype=self.dtype, device=self.device)
+            mesh_vol = self.mesh.cell_volumes.to(dtype=self.dtype, device=self.device)
             face_vols = torch.sparse.mm(
                 self.mesh.average_cell_to_face, mesh_vol.unsqueeze(1)
             ).squeeze()
