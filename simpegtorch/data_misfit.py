@@ -45,7 +45,7 @@ class BaseDataMisfit(nn.Module):
     ):
         super().__init__()
         self.simulation = simulation
-        self.mapping = mapping  # Optional mapping (e.g., active cell mapping)
+        self.mapping = mapping  # Optional mapping (e.g., log mapping)
         self.device = device
         self.dtype = dtype
 

@@ -12,7 +12,6 @@ from simpegtorch.maps import (
     LinearMapping,
 )
 from simpegtorch.discretize import TensorMesh
-from simpegtorch.utils import InjectActiveCells, active_from_xyz, create_flat_topography
 
 torch.set_default_dtype(torch.float64)
 
@@ -29,26 +28,6 @@ def test_mesh():
 
     mesh = TensorMesh([hx, hy, hz])
     return mesh
-
-
-@pytest.fixture
-def active_mapping(test_mesh):
-    """Create active cell mapping for test mesh"""
-    mesh = test_mesh
-
-    # Create simple topography
-    topo_xyz = create_flat_topography(
-        x_extent=(-2, 2),
-        y_extent=(-2, 2),
-        elevation=1.0,  # Surface at z=1
-        n_points_x=5,
-        n_points_y=5,
-    )
-
-    active_cells = active_from_xyz(mesh, topo_xyz)
-    air_value = 1e8
-
-    return InjectActiveCells(mesh, active_cells, valInactive=air_value)
 
 
 @pytest.fixture
@@ -82,28 +61,6 @@ class TestLogMapping:
 
         # Should transform log to linear via exp
         assert torch.allclose(result, expected_linear, rtol=1e-12)
-
-    def test_log_mapping_with_active_cells(self, active_mapping, test_parameters):
-        """Test log mapping with active cell injection"""
-        # Get number of active cells
-        n_active = torch.sum(active_mapping.active_cells).item()
-
-        log_params = torch.randn(n_active)
-        expected_linear = torch.exp(log_params)
-
-        mapper = LogMapping(active_mapping)
-        result = mapper(log_params)
-
-        # Result should be on full mesh
-        assert result.shape[0] == active_mapping.mesh.nC
-
-        # Active cells should have expected values
-        active_values = result[active_mapping.active_cells]
-        assert torch.allclose(active_values, expected_linear, rtol=1e-12)
-
-        # Inactive cells should have air value
-        inactive_values = result[~active_mapping.active_cells]
-        assert torch.allclose(inactive_values, torch.tensor(active_mapping.valInactive))
 
     def test_log_mapping_gradient(self, test_parameters):
         """Test gradient computation through log mapping"""
@@ -160,27 +117,6 @@ class TestLinearMapping:
         # Should be identical (identity mapping)
         assert torch.allclose(result, params, rtol=1e-15)
         assert result is not params  # But different tensor
-
-    def test_linear_mapping_with_active_cells(self, active_mapping, test_parameters):
-        """Test linear mapping with active cell injection"""
-        # Get number of active cells
-        n_active = torch.sum(active_mapping.active_cells).item()
-
-        params = torch.randn(n_active) * 100.0  # Random parameters
-
-        mapper = LinearMapping(active_mapping)
-        result = mapper(params)
-
-        # Result should be on full mesh
-        assert result.shape[0] == active_mapping.mesh.nC
-
-        # Active cells should have input values
-        active_values = result[active_mapping.active_cells]
-        assert torch.allclose(active_values, params, rtol=1e-15)
-
-        # Inactive cells should have air value
-        inactive_values = result[~active_mapping.active_cells]
-        assert torch.allclose(inactive_values, torch.tensor(active_mapping.valInactive))
 
     def test_linear_mapping_gradient(self, test_parameters):
         """Test gradient computation through linear mapping"""

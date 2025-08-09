@@ -217,7 +217,7 @@ def run_torch_dcr_inversion():
     simulation = Simulation3DNodal(mesh, survey=survey)
 
     # Create log resistivity mapping with PyTorch autograd
-    log_resistivity_mapping = LogMapping(active_mapping)
+    log_resistivity_mapping = LogMapping()
 
     # Data misfit with log resistivity mapping
     dmisfit = L2DataMisfit(

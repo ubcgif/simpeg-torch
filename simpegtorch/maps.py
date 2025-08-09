@@ -13,14 +13,8 @@ class LogMapping(torch.nn.Module):
     Log mapping using PyTorch autograd.
 
     This creates a PyTorch module that maps from log-space parameters to linear space
-    using automatic differentiation. Can be used with or without an additional
-    mapping to inject values into a mesh.
+    using automatic differentiation.
 
-    Parameters
-    ----------
-    mapping : torch.nn.Module, optional
-        Additional mapping to apply after the log transformation.
-        If None, only the log transformation is applied.
 
     Examples
     --------
@@ -28,22 +22,14 @@ class LogMapping(torch.nn.Module):
     >>> log_map = LogMapping()
     >>> log_params = torch.tensor([2.0, 3.0, 4.0])  # ln(values)
     >>> linear_params = log_map(log_params)  # exp(log_params)
-
-    >>> # Log mapping with active cell injection
-    >>> from simpegtorch.utils import InjectActiveCells
-    >>> active_mapping = InjectActiveCells(mesh, active_cells, valInactive=1e8)
-    >>> log_resist_map = LogMapping(active_mapping)
-    >>> log_resistivity = torch.tensor([4.0, 5.0, 6.0])  # log-resistivity on active cells
-    >>> full_resistivity = log_resist_map(log_resistivity)  # resistivity on full mesh
     """
 
-    def __init__(self, mapping=None):
+    def __init__(self):
         super().__init__()
-        self.mapping = mapping
 
     def forward(self, log_params):
         """
-        Transform log-parameters to linear space and apply additional mapping.
+        Transform log-parameters to linear space
 
         Parameters
         ----------
@@ -56,13 +42,21 @@ class LogMapping(torch.nn.Module):
             Transformed parameter values (linear space), optionally mapped
         """
         # Transform from log to linear space (differentiable)
-        linear_params = torch.exp(log_params)
+        return torch.exp(log_params)
 
-        # Apply additional mapping if provided
-        if self.mapping is not None:
-            return self.mapping.forward(linear_params)
-        else:
-            return linear_params
+    def inverse(self, linear_params):
+        """
+        Inverse of the transform taking parameters from log space to linear space
+        Parameters
+        ----------
+        linear_params : torch.Tensor
+            Linear-space parameter values
+        Returns
+        -------
+        torch.Tensor
+            Transformed parameter values (log space)
+        """
+        return torch.log(linear_params)
 
 
 class LinearMapping(torch.nn.Module):
@@ -94,9 +88,8 @@ class LinearMapping(torch.nn.Module):
     >>> full_resistivity = linear_resist_map(resistivity)  # resistivity on full mesh
     """
 
-    def __init__(self, mapping=None):
+    def __init__(self):
         super().__init__()
-        self.mapping = mapping
 
     def forward(self, params):
         """
@@ -112,11 +105,7 @@ class LinearMapping(torch.nn.Module):
         torch.Tensor
             Parameter values, optionally mapped
         """
-        # Apply additional mapping if provided
-        if self.mapping is not None:
-            return self.mapping.forward(params)
-        else:
-            return params.clone()  # Return a copy to avoid in-place operations
+        return params.clone()  # Return a copy to avoid in-place operations
 
 
 # Legacy aliases for backward compatibility
