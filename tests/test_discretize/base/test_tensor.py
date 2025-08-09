@@ -37,7 +37,7 @@ def test_gridded_2D(setup_meshes):
     test_hx = torch.all(H[:, 0] == expected_hx)
     test_hy = torch.all(H[:, 1] == expected_hy)
     assert test_hx and test_hy
-    assert H.device == torch.device(mesh2.device)
+    assert H.device.type == mesh2.device.type
 
 
 def test_gridded_3D(setup_meshes):
@@ -59,13 +59,13 @@ def test_gridded_3D(setup_meshes):
     test_hy = torch.all(H[:, 1] == expected_hy)
     test_hz = torch.all(H[:, 2] == expected_hz)
     assert test_hx and test_hy and test_hz
-    assert H.device == torch.device(mesh3.device)
+    assert H.device.type == mesh3.device.type
 
 
 def test_vectorN_2D(setup_meshes):
     mesh2, _ = setup_meshes
-    testNx = torch.tensor([3, 4, 5, 6])
-    testNy = torch.tensor([5, 6, 8])
+    testNx = torch.tensor([3, 4, 5, 6], device=mesh2.device)
+    testNy = torch.tensor([5, 6, 8], device=mesh2.device)
     xtest = torch.all(mesh2.nodes_x == testNx)
     ytest = torch.all(mesh2.nodes_y == testNy)
     assert xtest and ytest
@@ -73,8 +73,8 @@ def test_vectorN_2D(setup_meshes):
 
 def test_vectorCC_2D(setup_meshes):
     mesh2, _ = setup_meshes
-    testNx = torch.tensor([3.5, 4.5, 5.5])
-    testNy = torch.tensor([5.5, 7.0])
+    testNx = torch.tensor([3.5, 4.5, 5.5], device=mesh2.device)
+    testNy = torch.tensor([5.5, 7.0], device=mesh2.device)
     xtest = torch.all(mesh2.cell_centers_x == testNx)
     ytest = torch.all(mesh2.cell_centers_y == testNy)
     assert xtest and ytest
@@ -102,6 +102,7 @@ def test_area_2D(setup_meshes):
             1,
             1,
         ],
+        device=mesh2.device,
     )
     assert torch.all(mesh2.face_areas == test_area)
 
@@ -163,19 +164,20 @@ def test_area_3D(setup_meshes):
             2,
             2,
         ],
+        device=mesh3.device,
     )
     assert torch.all(mesh3.face_areas == test_area)
 
 
 def test_vol_3D(setup_meshes):
     _, mesh3 = setup_meshes
-    test_vol = torch.tensor([1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 8])
+    test_vol = torch.tensor([1, 1, 1, 2, 2, 2, 4, 4, 4, 8, 8, 8], device=mesh3.device)
     assert torch.all(mesh3.cell_volumes == test_vol)
 
 
 def test_vol_2D(setup_meshes):
     mesh2, _ = setup_meshes
-    test_vol = torch.tensor([1, 1, 1, 2, 2, 2])
+    test_vol = torch.tensor([1, 1, 1, 2, 2, 2], device=mesh2.device)
     assert torch.all(mesh2.cell_volumes == test_vol)
 
 
@@ -259,13 +261,16 @@ def test_edge_3D(setup_meshes):
             4,
             4,
         ],
+        device=mesh3.device,
     )
     assert torch.all(mesh3.edge_lengths == test_edge)
 
 
 def test_edge_2D(setup_meshes):
     mesh2, _ = setup_meshes
-    test_edge = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2])
+    test_edge = torch.tensor(
+        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2], device=mesh2.device
+    )
     assert torch.all(mesh2.edge_lengths == test_edge)
 
 

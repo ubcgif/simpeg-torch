@@ -68,15 +68,19 @@ class TensorCell:
     """
 
     def __init__(self, h, origin, index_unraveled, mesh_shape, dtype=None, device=None):
-        self._h = h
-        self._origin = origin
-        self._index_unraveled = index_unraveled
-        self._mesh_shape = mesh_shape
-
         if dtype is None:
             dtype = torch.float64
         self._dtype = dtype
-        self._device = device
+
+        if device is None:
+            device = "cpu"
+        self._device = torch.device(device)
+
+        # Ensure h and origin are tensors on the correct device
+        self._h = torch.as_tensor(h, dtype=self._dtype, device=self._device)
+        self._origin = torch.as_tensor(origin, dtype=self._dtype, device=self._device)
+        self._index_unraveled = index_unraveled
+        self._mesh_shape = mesh_shape
 
     def __repr__(self):
         """Represent a TensorCell."""
@@ -132,6 +136,12 @@ class TensorCell:
             )
 
         self._device = device
+        
+        # Move internal tensors to new device
+        if hasattr(self, "_h") and self._h is not None:
+            self._h = self._h.to(device)
+        if hasattr(self, "_origin") and self._origin is not None:
+            self._origin = self._origin.to(device)
 
     @property
     def dtype(self):
@@ -159,6 +169,8 @@ class TensorCell:
     @property
     def origin(self):
         """Coordinates of the origin of the cell."""
+        if self._origin.device != self.device:
+            self._origin = self._origin.to(self.device)
         return self._origin
 
     @property

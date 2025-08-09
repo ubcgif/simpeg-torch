@@ -62,13 +62,13 @@ def unpack_widths(value, dtype=torch.float64, device=None):
         elif type(v) is tuple and len(v) == 3:
             start = float(v[0])
             num = int(v[1])
-            factor = float(v[2])
+            factor = torch.tensor(float(v[2]))
             pad = (
                 (torch.ones(num, dtype=dtype, device=device) * torch.abs(factor))
                 ** (torch.arange(num, dtype=dtype, device=device) + 1)
             ) * start
             if factor < 0:
-                pad = pad[::-1]
+                pad = pad[:-1]
             proposed += pad.tolist()
         else:
             raise Exception(

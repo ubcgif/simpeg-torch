@@ -109,15 +109,15 @@ class InnerProducts(BaseMesh):
 
         tensorType = TensorType(self, model)
 
-        Mu = make_property_tensor(self, model, sparse_type="coo")
+        Mu = make_property_tensor(self, model, sparse_type="coo", device=self.device)
         # Uses COO format for the inner product matrix as CSR does not support batch operations or additions
         # This is platform dependent, so we use COO format for consistency
         Ps = self._getInnerProductProjectionMatrices(projection_type, tensorType)
         # Manually sum sparse tensors since torch.sum doesn't work on lists of sparse tensors
-        terms = [torch.sparse.mm(torch.sparse.mm(P.T, Mu), P) for P in Ps]
-        A = terms[0]
-        for term in terms[1:]:
-            A = A + term
+        A_stack = [torch.sparse.mm(torch.sparse.mm(P.T, Mu), P) for P in Ps]
+        A = A_stack[0]
+        for As in A_stack[1:]:
+            A += As
 
         if invert_matrix and tensorType < 3:
             A = sdinv(A)
@@ -150,7 +150,7 @@ class InnerProducts(BaseMesh):
         d = self.dim
         # We will multiply by sqrt on each side to keep symmetry
         V = kron(
-            speye(d),
+            speye(d, device=self.device, dtype=self.dtype),
             sdiag(torch.sqrt((2 ** (-d)) * self.cell_volumes)),
             sparse_type="coo",
         )

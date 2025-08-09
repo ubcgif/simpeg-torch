@@ -233,9 +233,9 @@ class DiffOperators(BaseMesh):
             )
         elif self.dim == 3:
             Dx = kron3(
-                speye(self.shape_cells[2]),
-                speye(self.shape_cells[1]),
-                ddx(self.shape_cells[0]),
+                speye(self.shape_cells[2], dtype=self.dtype, device=self.device),
+                speye(self.shape_cells[1], dtype=self.dtype, device=self.device),
+                ddx(self.shape_cells[0], dtype=self.dtype, device=self.device),
             )
         return Dx
 

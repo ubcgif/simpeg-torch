@@ -2,6 +2,7 @@ import torch
 import os
 import json
 from ..utils import is_scalar, sdiag, mkvc, sdinv, as_array_n_by_dim
+from ..mixins import InterfaceMPL
 
 try:
     from scipy.spatial import KDTree
@@ -9,7 +10,7 @@ except ImportError:
     KDTree = None
 
 
-class BaseMesh:
+class BaseMesh(InterfaceMPL):
     """
     Base mesh class for the ``discretize`` package.
 

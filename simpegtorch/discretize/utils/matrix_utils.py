@@ -64,7 +64,16 @@ def sdiag(v, dtype=torch.float64, device=None, sparse_type="coo"):
     if isinstance(v, Zero):
         return Zero()
 
-    v = torch.as_tensor(v, dtype=dtype, device=device)
+    # Preserve gradient flow by checking if tensor already has the right properties
+    if (
+        torch.is_tensor(v)
+        and v.device == (device or v.device)
+        and v.dtype == (dtype or v.dtype)
+    ):
+        # Don't convert if already correct to preserve gradients
+        pass
+    else:
+        v = torch.as_tensor(v, dtype=dtype, device=device)
     v = v.view(-1)
     n = v.numel()
 
@@ -166,6 +175,11 @@ def kron(A, B, sparse_type="coo"):
     kronecker product in a tensor sparse coo matrix format
 
     """
+
+    # Ensure both matrices are on the same device
+    if A.device != B.device:
+        # Move B to A's device to maintain device consistency
+        B = B.to(device=A.device)
 
     # # check if A and B are coalesced
     if A.is_sparse & (not A.is_coalesced()):
@@ -477,6 +491,111 @@ def get_diag(A):
     return diag
 
 
+class SparseDiagInverse(torch.autograd.Function):
+    """Custom autograd function for sparse diagonal matrix inversion that preserves gradients."""
+
+    @staticmethod
+    def forward(ctx, M):
+        """Forward pass: invert diagonal sparse matrix."""
+        sparse_type = "coo"
+        if M.is_sparse_csr:
+            M = M.to_sparse_coo()
+            sparse_type = "csr"
+
+        if not M.is_sparse:
+            raise TypeError("Input must be a torch sparse tensor.")
+
+        # CRITICAL: Coalesce the matrix to handle duplicate entries correctly
+        # This ensures proper behavior on CUDA where matrices may not be auto-coalesced
+        if not M.is_coalesced():
+            M = M.coalesce()
+
+        indices = M._indices()
+        values = M._values()
+
+        # Check for non-diagonal entries
+        is_diag = indices[0] == indices[1]
+        if not torch.all(is_diag):
+            raise ValueError("Input sparse matrix has non-zero off-diagonal entries.")
+
+        diag_values = values[is_diag]
+        if (diag_values == 0).any():
+            raise ZeroDivisionError(
+                "Cannot invert a diagonal matrix with zero entries."
+            )
+
+        # Compute inverse values
+        inv_values = 1.0 / diag_values
+
+        # Create the inverted sparse matrix
+        inv_tensor = torch.sparse_coo_tensor(
+            indices[:, is_diag], inv_values, M.shape, dtype=M.dtype, device=M.device
+        ).coalesce()
+
+        # Save for backward
+        ctx.save_for_backward(inv_values)
+        ctx.indices = indices[:, is_diag]
+        ctx.shape = M.shape
+        ctx.sparse_type = sparse_type
+
+        if sparse_type == "csr":
+            return inv_tensor.to_sparse_csr()
+        else:
+            return inv_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """Backward pass: gradient of diagonal matrix inversion."""
+        (inv_values,) = ctx.saved_tensors
+        indices = ctx.indices
+        shape = ctx.shape
+
+        # Convert grad_output to COO if needed
+        if grad_output.is_sparse_csr:
+            grad_output = grad_output.to_sparse_coo()
+
+        grad_output = grad_output.coalesce()
+
+        # Extract only the diagonal values from grad_output
+        grad_indices = grad_output._indices()
+        grad_values = grad_output._values()
+
+        # Find diagonal entries in grad_output
+        is_grad_diag = grad_indices[0] == grad_indices[1]
+        grad_diag_values = grad_values[is_grad_diag]
+
+        # Ensure we have the same number of diagonal elements
+        if grad_diag_values.numel() != inv_values.numel():
+            # If grad_output has different sparsity pattern, create properly sized gradient
+            grad_diag_values = torch.zeros_like(inv_values)
+            grad_diag_indices = grad_indices[:, is_grad_diag]
+            if grad_diag_indices.numel() > 0:
+                # Map the grad diagonal values to the correct positions
+                diag_positions = grad_diag_indices[
+                    0
+                ]  # Row indices of diagonal elements
+                input_positions = indices[0]  # Row indices of input diagonal elements
+                for i, pos in enumerate(input_positions):
+                    mask = diag_positions == pos
+                    if mask.any():
+                        grad_diag_values[i] = grad_values[is_grad_diag][mask][0]
+
+        # For diagonal matrix inversion, d/dx(1/x) = -1/x^2
+        # The gradient flows back as: grad_input = -grad_output * (inv_values)^2
+        grad_input_values = -grad_diag_values * (inv_values**2)
+
+        # Create gradient tensor with same sparsity pattern as input
+        grad_input = torch.sparse_coo_tensor(
+            indices,
+            grad_input_values,
+            shape,
+            dtype=grad_input_values.dtype,
+            device=grad_input_values.device,
+        ).coalesce()
+
+        return grad_input
+
+
 def sdinv(M):
     """
     Return the inverse of a sparse diagonal matrix in PyTorch.
@@ -501,27 +620,7 @@ def sdinv(M):
     ZeroDivisionError
         If the matrix contains zeros on the diagonal.
     """
-    sparse_type = "coo"
-    if M.is_sparse_csr:
-        M = M.to_sparse_coo()
-        sparse_type = "csr"
-
-    if not M.is_sparse:
-        raise TypeError("Input must be a torch sparse tensor.")
-
-    indices = M._indices()
-    values = M._values()
-
-    # Check for non-diagonal entries
-    is_diag = indices[0] == indices[1]
-    if not torch.all(is_diag):
-        raise ValueError("Input sparse matrix has non-zero off-diagonal entries.")
-
-    diag = values[is_diag]
-    if (diag == 0).any():
-        raise ZeroDivisionError("Cannot invert a diagonal matrix with zero entries.")
-
-    return sdiag(1.0 / diag, sparse_type=sparse_type)
+    return SparseDiagInverse.apply(M)
 
 
 def make_boundary_bool(shape, bdir="xyz"):
@@ -611,7 +710,7 @@ def ndgrid(*args, vector=True, order="F", dtype=torch.float64, device=None):
 def sub2ind(shape, subs):
     """Torch version of sub2ind using Fortran order."""
     subs = torch.as_tensor(subs, dtype=torch.long)
-    shape = torch.tensor(shape, dtype=torch.long)
+    shape = torch.as_tensor(shape, dtype=torch.long, device=subs.device)
     if subs.ndim == 1:
         subs = subs.unsqueeze(0)
     if subs.shape[1] != len(shape):
@@ -1346,12 +1445,21 @@ def make_property_tensor(
     elif is_scalar(tensor):
         tensor = tensor * torch.ones(n_cells, device=device, dtype=dtype)
     else:
-        tensor = torch.as_tensor(tensor, device=device, dtype=dtype)
+        # Preserve gradient flow by checking if tensor already has the right properties
+        if (
+            torch.is_tensor(tensor)
+            and tensor.device == device
+            and tensor.dtype == dtype
+        ):
+            # Don't convert if already correct to preserve gradients
+            pass
+        else:
+            tensor = torch.as_tensor(tensor, device=device, dtype=dtype)
 
     propType = TensorType(mesh, tensor)
 
     if propType == 1:  # Isotropic
-        Sigma = kron(speye(dim), sdiag(mkvc(tensor)))
+        Sigma = kron(speye(dim, device=device, dtype=dtype), sdiag(mkvc(tensor)))
 
     elif propType == 2:  # Anisotropic
         Sigma = sdiag(mkvc(tensor))

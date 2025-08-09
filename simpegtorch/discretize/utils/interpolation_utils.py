@@ -42,8 +42,8 @@ def interpolation_matrix(locs, x, y=None, z=None, dtype=torch.float64, device=No
         # Tuple of index tensors → stack and transpose
         subs = torch.stack(inds, dim=0).T  # (N, ndim)
     elif inds.ndim == 2:
-        # Already 2D tensor → just transpose
-        subs = inds.T
+        # Already 2D tensor → should already be (N, ndim)
+        subs = inds
     elif inds.ndim == 1:
         # Single 1D tensor → unsqueeze to get (N, 1)
         subs = inds.unsqueeze(1)
@@ -103,7 +103,10 @@ def _get_inds_ws(x, xp):
         w1 = (x[i2] - xp) / denom
     w2 = 1.0 - w1
 
-    return i1, i2, w1.item(), w2
+    # Convert w1 to scalar if it's a tensor
+    if isinstance(w1, torch.Tensor):
+        w1 = w1.item()
+    return i1, i2, w1, w2
 
 
 def _interpmat1D(locs, x):
