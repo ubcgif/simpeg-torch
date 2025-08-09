@@ -1,0 +1,3 @@
+coverage:
+  ignore:
+    - "simpegtorch/discretize/mixins/mpl_mod.py"
