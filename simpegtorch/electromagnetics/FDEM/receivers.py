@@ -10,8 +10,8 @@ class BaseFDEMReceiver:
         ----------
         locations : array_like
             Receiver locations (n_receivers, 3)
-        orientation : str
-            Field component orientation ('x', 'y', 'z')
+        orientation : str or array_like
+            Field component orientation. Can be 'x', 'y', 'z' or a 3-vector like [0, 0, 1]
         component : str
             Complex component ('real', 'imag')
         """
@@ -21,7 +21,16 @@ class BaseFDEMReceiver:
             self.locations = torch.tensor(locations, dtype=torch.float64)
         if self.locations.ndim == 1:
             self.locations = self.locations.reshape(1, -1)
-        self.orientation = orientation
+
+        # Convert orientation to vector format
+        if isinstance(orientation, str):
+            orient_map = {"x": [1, 0, 0], "y": [0, 1, 0], "z": [0, 0, 1]}
+            self.orientation = torch.tensor(
+                orient_map[orientation], dtype=torch.float64
+            )
+        else:
+            self.orientation = torch.tensor(orientation, dtype=torch.float64)
+
         self.component = component
 
     @property
@@ -32,6 +41,36 @@ class BaseFDEMReceiver:
     def evaluate(self, fields, simulation):
         """Extract data from fields at receiver locations"""
         raise NotImplementedError("evaluate must be implemented in derived classes")
+
+    def _get_projection_matrix(self, mesh, projected_grid):
+        """
+        Get projection matrix from mesh to receivers (following SimPEG pattern).
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The mesh
+        projected_grid : str
+
+        Returns
+        -------
+        torch.Tensor
+            Projection matrix
+        """
+        # Initialize zero matrix
+        n_grid = getattr(mesh, f"n_{projected_grid[:-1]}")
+        P = torch.zeros(self.locations.shape[0], n_grid, dtype=torch.complex128)
+
+        # Component-wise interpolation like SimPEG
+        for strength, comp in zip(self.orientation, ["x", "y", "z"]):
+            if strength != 0.0:
+                location_type = projected_grid + comp  # e.g., "faces_x"
+                P_comp = mesh.get_interpolation_matrix(
+                    self.locations, location_type=location_type
+                )
+                P = P + strength * P_comp.to(dtype=torch.complex128)
+
+        return P
 
 
 class PointMagneticFluxDensity(BaseFDEMReceiver):
@@ -53,29 +92,17 @@ class PointMagneticFluxDensity(BaseFDEMReceiver):
         torch.Tensor
             Data at receiver locations
         """
-        # Get interpolation matrix from faces to receiver locations
-        P = simulation.mesh.get_interpolation_matrix(self.locations, location_type="F")
+        # Get projection matrix using component-wise interpolation (like SimPEG)
+        P = self._get_projection_matrix(simulation.mesh, "faces_")
 
         # Interpolate fields to receiver locations
         b_interp = P @ fields
 
-        # For 3D, need to extract the correct component
-        if simulation.mesh.dim == 3:
-            # Reshape to (n_receivers, 3) for vector field
-            b_vector = b_interp.reshape(-1, 3)
-
-            # Extract component
-            comp_idx = {"x": 0, "y": 1, "z": 2}[self.orientation]
-            b_comp = b_vector[:, comp_idx]
-        else:
-            # For 2D, assume z-component
-            b_comp = b_interp
-
         # Return real or imaginary part
         if self.component == "real":
-            return b_comp.real
+            return b_interp.real
         else:
-            return b_comp.imag
+            return b_interp.imag
 
 
 class PointMagneticFluxDensitySecondary(PointMagneticFluxDensity):
@@ -105,7 +132,7 @@ class PointElectricField(BaseFDEMReceiver):
         E = -iωμ⁻¹∇×B
         """
         # Get curl matrix
-        C = simulation.mesh.edge_curl
+        C = simulation.mesh.edge_curl.to(dtype=torch.complex128)
 
         # Compute electric field from magnetic flux density
         # E = -iω * μ⁻¹ * C.T * B
@@ -118,20 +145,12 @@ class PointElectricField(BaseFDEMReceiver):
         e_field = -1j * omega / mu0 * (C.T @ fields)
 
         # Interpolate to receiver locations
-        P = simulation.mesh.get_interpolation_matrix(self.locations, location_type="E")
+        P = self._get_projection_matrix(simulation.mesh, "edges_")
 
         e_interp = P @ e_field
 
-        # Extract component
-        if simulation.mesh.dim == 3:
-            e_vector = e_interp.reshape(-1, 3)
-            comp_idx = {"x": 0, "y": 1, "z": 2}[self.orientation]
-            e_comp = e_vector[:, comp_idx]
-        else:
-            e_comp = e_interp
-
         # Return real or imaginary part
         if self.component == "real":
-            return e_comp.real
+            return e_interp.real
         else:
-            return e_comp.imag
+            return e_interp.imag

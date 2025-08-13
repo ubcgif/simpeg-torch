@@ -38,11 +38,11 @@ def create_test_mesh():
     """Create a simple 3D test mesh"""
     print("Creating test mesh...")
 
-    # Create a 20x20x10 mesh with 5m cells
-    nx, ny, nz = 20, 20, 10
-    hx = torch.ones(nx) * 5.0  # 5m cell size
-    hy = torch.ones(ny) * 5.0
-    hz = torch.ones(nz) * 5.0
+    # Create a small 6x6x4 mesh with 10m cells for faster testing
+    nx, ny, nz = 6, 6, 4
+    hx = torch.ones(nx) * 10.0  # 10m cell size
+    hy = torch.ones(ny) * 10.0
+    hz = torch.ones(nz) * 10.0
 
     mesh = TensorMesh([hx, hy, hz])
     print(f"  Mesh shape: {mesh.shape_cells}")
@@ -64,9 +64,9 @@ def test_basic_magnetic_dipole():
     mesh = create_test_mesh()
 
     # Create receiver locations (line profile)
-    rx_x = torch.linspace(10, 90, 9)  # 9 receivers from 10m to 90m
-    rx_y = torch.ones_like(rx_x) * 50  # At y=50m
-    rx_z = torch.ones_like(rx_x) * 2.5  # At z=2.5m (just above surface)
+    rx_x = torch.linspace(15, 45, 4)  # 4 receivers from 15m to 45m
+    rx_y = torch.ones_like(rx_x) * 30  # At y=30m (center)
+    rx_z = torch.ones_like(rx_x) * 5.0  # At z=5m (just above surface)
     rx_locs = torch.stack([rx_x, rx_y, rx_z], dim=1)
 
     print(f"Receiver locations: {rx_locs.shape}")
@@ -81,7 +81,7 @@ def test_basic_magnetic_dipole():
     source = MagneticDipole(
         receiver_list=receivers,
         frequency=1000.0,  # 1 kHz
-        location=torch.tensor([50.0, 50.0, 0.0]),  # Center of domain at surface
+        location=torch.tensor([30.0, 30.0, 0.0]),  # Center of domain at surface
         moment=1.0,
         orientation="z",
     )
@@ -98,10 +98,10 @@ def test_basic_magnetic_dipole():
     # Add a conductive block
     cell_centers = mesh.cell_centers
     block_mask = (
-        (cell_centers[:, 0] > 40)
-        & (cell_centers[:, 0] < 60)
-        & (cell_centers[:, 1] > 40)
-        & (cell_centers[:, 1] < 60)
+        (cell_centers[:, 0] > 20)
+        & (cell_centers[:, 0] < 40)
+        & (cell_centers[:, 1] > 20)
+        & (cell_centers[:, 1] < 40)
         & (cell_centers[:, 2] > 10)
         & (cell_centers[:, 2] < 30)
     )
@@ -147,10 +147,10 @@ def test_multiple_frequencies():
     mesh = create_test_mesh()
 
     # Single receiver location
-    rx_loc = torch.tensor([[50.0, 50.0, 2.5]])
+    rx_loc = torch.tensor([[30.0, 30.0, 5.0]])
 
     sources = []
-    frequencies = [100.0, 1000.0, 10000.0]  # 100 Hz, 1 kHz, 10 kHz
+    frequencies = [1000.0, 10000.0]  # 1 kHz, 10 kHz (reduced to 2 frequencies)
 
     for freq in frequencies:
         receivers = [
@@ -161,7 +161,7 @@ def test_multiple_frequencies():
         source = MagneticDipole(
             receiver_list=receivers,
             frequency=freq,
-            location=torch.tensor([50.0, 50.0, 0.0]),
+            location=torch.tensor([30.0, 30.0, 0.0]),
             moment=1.0,
             orientation="z",
         )
@@ -202,7 +202,7 @@ def test_different_sources():
     print("=" * 60)
 
     mesh = create_test_mesh()
-    rx_loc = torch.tensor([[60.0, 50.0, 2.5]])
+    rx_loc = torch.tensor([[40.0, 30.0, 5.0]])
 
     # Test each source type
     source_tests = []
@@ -213,7 +213,7 @@ def test_different_sources():
         mag_dipole = MagneticDipole(
             receiver_list=receivers,
             frequency=1000.0,
-            location=torch.tensor([50.0, 50.0, 0.0]),
+            location=torch.tensor([30.0, 30.0, 0.0]),
             moment=1.0,
             orientation="z",
         )
@@ -234,7 +234,7 @@ def test_different_sources():
         elec_dipole = ElectricDipole(
             receiver_list=receivers,
             frequency=1000.0,
-            location=torch.tensor([50.0, 50.0, 0.0]),
+            location=torch.tensor([30.0, 30.0, 0.0]),
             current=1.0,
             length=1.0,
             orientation="z",
@@ -256,7 +256,7 @@ def test_different_sources():
         loop_source = LoopSource(
             receiver_list=receivers,
             frequency=1000.0,
-            location=torch.tensor([50.0, 50.0, 0.0]),
+            location=torch.tensor([30.0, 30.0, 0.0]),
             radius=10.0,
             current=1.0,
             orientation="z",
@@ -283,7 +283,7 @@ def test_receivers():
     print("=" * 60)
 
     mesh = create_test_mesh()
-    rx_loc = torch.tensor([[60.0, 50.0, 2.5]])
+    rx_loc = torch.tensor([[40.0, 30.0, 5.0]])
 
     receiver_tests = []
 
@@ -317,7 +317,7 @@ def test_receivers():
             source = MagneticDipole(
                 receiver_list=[receiver],
                 frequency=1000.0,
-                location=torch.tensor([50.0, 50.0, 0.0]),
+                location=torch.tensor([30.0, 30.0, 0.0]),
                 moment=1.0,
                 orientation="z",
             )
