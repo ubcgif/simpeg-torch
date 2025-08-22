@@ -121,6 +121,9 @@ class BaseRegularization(nn.Module):
                 raise TypeError(
                     f"Mapping must be callable or have forward method, got {type(self.mapping)}"
                 )
+        else:
+            # Identity mapping if no mapping provided
+            mapped_model = model
 
         # Ensure reference model doesn't require gradients
         reference_detached = (

@@ -77,16 +77,20 @@ class BaseInversion:
                 m0, dtype=self.dtype, device=self.device, requires_grad=True
             )
         elif isinstance(m0, torch.Tensor):
-            # Don't modify the original tensor - it should already be set up correctly
+            # Ensure requires_grad is True and move to correct device/dtype
             m0 = m0.to(dtype=self.dtype, device=self.device)
+            if not m0.requires_grad:
+                m0.requires_grad_(True)
 
         self.model = m0
 
         # Initialize directives
         self._call_directives("initialize")
 
-        # Setup optimizer
+        # Setup optimizer with the actual model parameters
         optimizer = self.inv_prob.optimizer
+        # Update optimizer to use the actual model parameters
+        optimizer.param_groups[0]["params"] = [self.model]
 
         print(f"Running inversion with {len(self.directives)} directives")
         print(f"Initial model shape: {self.model.shape}")
@@ -166,10 +170,8 @@ class BaseInvProblem:
         Data misfit term
     reg : BaseRegularization
         Regularization term
-    optimizer_class : str or torch.optim.Optimizer, optional
-        PyTorch optimizer class name or class (default: 'Adam')
-    optimizer_kwargs : dict, optional
-        Keyword arguments for optimizer
+    optimizer : torch.optim.Optimizer
+        Optimizer for model updates (e.g., Adam, SGD)
     beta : float, optional
         Trade-off parameter between data misfit and regularization
     max_iter : int, optional

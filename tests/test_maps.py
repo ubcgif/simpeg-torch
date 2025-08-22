@@ -9,7 +9,6 @@ import torch
 
 from simpegtorch.maps import (
     LogMapping,
-    LinearMapping,
 )
 from simpegtorch.discretize import TensorMesh
 
@@ -102,45 +101,3 @@ class TestLogMapping:
 
         assert torch.all(result_large > 1e4)  # Very large
         assert torch.all(torch.isfinite(result_large))  # But finite
-
-
-class TestLinearMapping:
-    """Test LinearMapping class"""
-
-    def test_linear_mapping_basic(self, test_parameters):
-        """Test basic linear mapping functionality (identity)"""
-        params = test_parameters["linear_params"]
-
-        mapper = LinearMapping()
-        result = mapper(params)
-
-        # Should be identical (identity mapping)
-        assert torch.allclose(result, params, rtol=1e-15)
-        assert result is not params  # But different tensor
-
-    def test_linear_mapping_gradient(self, test_parameters):
-        """Test gradient computation through linear mapping"""
-        params = test_parameters["linear_params"].clone()
-        params.requires_grad_(True)
-
-        mapper = LinearMapping()
-        result = mapper(params)
-        loss = torch.sum(result)
-        loss.backward()
-
-        # Gradient should be all ones (identity mapping)
-        expected_grad = torch.ones_like(params)
-        assert torch.allclose(params.grad, expected_grad, rtol=1e-15)
-
-    def test_linear_mapping_preserves_values(self, test_parameters):
-        """Test that linear mapping preserves all input characteristics"""
-        params = test_parameters["linear_params"]
-
-        mapper = LinearMapping()
-        result = mapper(params)
-
-        # Should preserve min, max, mean, std
-        assert torch.allclose(torch.min(result), torch.min(params))
-        assert torch.allclose(torch.max(result), torch.max(params))
-        assert torch.allclose(torch.mean(result), torch.mean(params))
-        assert torch.allclose(torch.std(result), torch.std(params))
