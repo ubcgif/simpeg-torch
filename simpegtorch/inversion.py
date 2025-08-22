@@ -7,7 +7,7 @@ leveraging automatic differentiation and GPU acceleration.
 
 import torch
 import numpy as np
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Union
 
 
 class BaseInversion:
@@ -71,19 +71,22 @@ class BaseInversion:
         numpy.ndarray
             Recovered model
         """
-        # Convert to PyTorch tensor
+        # Use the provided model directly (it should already be properly configured)
         if isinstance(m0, np.ndarray):
-            m0 = torch.tensor(m0, dtype=self.dtype, device=self.device)
+            m0 = torch.tensor(
+                m0, dtype=self.dtype, device=self.device, requires_grad=True
+            )
         elif isinstance(m0, torch.Tensor):
+            # Don't modify the original tensor - it should already be set up correctly
             m0 = m0.to(dtype=self.dtype, device=self.device)
 
-        self.model = m0.clone().requires_grad_(True)
+        self.model = m0
 
         # Initialize directives
         self._call_directives("initialize")
 
         # Setup optimizer
-        optimizer = self.inv_prob.setup_optimizer(self.model)
+        optimizer = self.inv_prob.optimizer
 
         print(f"Running inversion with {len(self.directives)} directives")
         print(f"Initial model shape: {self.model.shape}")
@@ -111,6 +114,11 @@ class BaseInversion:
                 self.phi_history.append(phi.item())
                 self.beta_history.append(self.inv_prob.beta)
 
+            # Check gradients before step
+            grad_norm = (
+                self.model.grad.norm().item() if self.model.grad is not None else 0.0
+            )
+
             # Update parameters
             optimizer.step()
 
@@ -118,7 +126,8 @@ class BaseInversion:
             if self.iteration % 1 == 0:
                 print(
                     f"Iter {self.iteration:3d}: φ = {phi.item():.2e} "
-                    f"(φ_d = {phi_d.item():.2e}, β×φ_m = {self.inv_prob.beta*phi_m.item():.2e})"
+                    f"(φ_d = {phi_d.item():.2e}, β×φ_m = {self.inv_prob.beta*phi_m.item():.2e}) "
+                    f"grad_norm = {grad_norm:.2e}"
                 )
 
             self.iteration += 1
@@ -171,8 +180,7 @@ class BaseInvProblem:
         self,
         dmisfit,
         reg,
-        optimizer_class: Union[str, Any] = "Adam",
-        optimizer_kwargs: Optional[Dict] = None,
+        optimizer: torch.optim.Optimizer,
         beta: float = 1.0,
         max_iter: int = 50,
     ):
@@ -180,14 +188,7 @@ class BaseInvProblem:
         self.reg = reg
         self.beta = beta
         self.max_iter = max_iter
-
-        # Setup optimizer
-        if isinstance(optimizer_class, str):
-            self.optimizer_class = getattr(torch.optim, optimizer_class)
-        else:
-            self.optimizer_class = optimizer_class
-
-        self.optimizer_kwargs = optimizer_kwargs or {"lr": 0.01}
+        self.optimizer = optimizer
 
     def __call__(self, model: torch.Tensor) -> torch.Tensor:
         """
@@ -206,10 +207,6 @@ class BaseInvProblem:
         phi_d = self.dmisfit(model)
         phi_m = self.reg(model)
         return phi_d + self.beta * phi_m
-
-    def setup_optimizer(self, model: torch.Tensor):
-        """Setup PyTorch optimizer for the model parameters"""
-        return self.optimizer_class([model], **self.optimizer_kwargs)
 
 
 class InversionDirective:

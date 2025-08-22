@@ -47,7 +47,7 @@ class BaseDcSimulation:
         """
         raise NotImplementedError("Subclasses must implement fields method")
 
-    def dpred(self, m, f=None):
+    def dpred(self, m=None, f=None):
         """
         Compute predicted data for the given model.
 
