@@ -123,8 +123,11 @@ class BaseInversion:
                 self.model.grad.norm().item() if self.model.grad is not None else 0.0
             )
 
+            # Get individual grad info from misfir and regularization
+
             # Update parameters
-            optimizer.step()
+            # supply the closure to the optimizer if needed
+            optimizer.step(closure=lambda: self.inv_prob(self.model))
 
             # Print iteration info
             if self.iteration % 1 == 0:
