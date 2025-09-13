@@ -175,55 +175,6 @@ class BaseDcSimulation:
 
         return m.grad.clone()
 
-    def Jvec(self, m, v, f=None):
-        r"""Compute the Jacobian times a vector for the model provided.
-
-        The Jacobian defines the derivative of the predicted data vector with respect to the
-        model parameters. For a data vector :math:`\mathbf{d}` predicted for a set of model parameters
-        :math:`\mathbf{m}`, the Jacobian is an ``(n_data, n_param)`` matrix whose elements
-        are given by:
-
-        .. math::
-            J_{ij} = \frac{\partial d_i}{\partial m_j}
-
-        For a model `m` and vector `v`, the ``Jvec`` method computes the matrix-vector product
-
-        .. math::
-            \mathbf{u} = \mathbf{J \, v}
-
-        Parameters
-        ----------
-        m : torch.Tensor, shape (n_param,)
-            The model parameters (resistivity values).
-        v : torch.Tensor, shape (n_param,)
-            Vector we are multiplying.
-        f : torch.Tensor, optional
-            If provided, fields will not need to be recomputed for the
-            current model to compute `Jvec`.
-
-        Returns
-        -------
-        torch.Tensor, shape (n_data,)
-            The Jacobian times a vector for the model and vector provided.
-        """
-        # Use finite differences for Jvec due to sparse matrix autodiff limitations
-        eps = 1e-7
-        f_plus = self.dpred(
-            m + eps * v, f=None
-        )  # Can't reuse fields for perturbed model
-        f_minus = self.dpred(m - eps * v, f=None)
-        return (f_plus - f_minus) / (2 * eps)
-
-    def _get_formulation(self):
-        """Get the formulation string for receiver tensor building. Must be implemented by subclasses."""
-        raise NotImplementedError("Subclasses must implement _get_formulation method")
-
-    def _prepare_field_for_receivers(self, src_field, rx_tensor):
-        """Prepare field tensor for receiver computation. Must be implemented by subclasses."""
-        raise NotImplementedError(
-            "Subclasses must implement _prepare_field_for_receivers method"
-        )
-
 
 class Simulation3DCellCentered(BaseDcSimulation):
     def __init__(

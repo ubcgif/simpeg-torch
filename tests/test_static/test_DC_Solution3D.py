@@ -4,7 +4,7 @@ import scipy.sparse as sparse
 import unittest
 
 from simpegtorch.discretize import TensorMesh
-from simpegtorch.electromagnetics.resistivity import (
+from simpegtorch.simulation.resistivity import (
     Simulation3DNodal,
     Simulation3DCellCentered,
     SrcDipole,
