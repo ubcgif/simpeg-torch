@@ -121,60 +121,6 @@ class BaseDcSimulation:
         else:
             return 0
 
-    def Jtvec(self, m, v, f=None):
-        r"""Compute the Jacobian transpose times a vector for the model provided.
-
-        The Jacobian defines the derivative of the predicted data vector with respect to the
-        model parameters. For a data vector :math:`\mathbf{d}` predicted for a set of model parameters
-        :math:`\mathbf{m}`, the Jacobian is an ``(n_data, n_param)`` matrix whose elements
-        are given by:
-
-        .. math::
-            J_{ij} = \frac{\partial d_i}{\partial m_j}
-
-        For a model `m` and vector `v`, the ``Jtvec`` method computes the matrix-vector product with the adjoint-sensitivity
-
-        .. math::
-            \mathbf{u} = \mathbf{J^T \, v}
-
-        Parameters
-        ----------
-        m : torch.Tensor, shape (n_param,)
-            The model parameters (resistivity values).
-        v : torch.Tensor, shape (n_data,)
-            Vector we are multiplying.
-        f : torch.Tensor, optional
-            If provided, fields will not need to be recomputed for the
-            current model to compute `Jtvec`.
-
-        Returns
-        -------
-        torch.Tensor, shape (n_param,)
-            The Jacobian transpose times a vector for the model and vector provided.
-        """
-        # Ensure model requires gradients
-        if not m.requires_grad:
-            m = m.requires_grad_(True)
-
-        # Clear any existing gradients
-        if m.grad is not None:
-            m.grad.zero_()
-
-        # Forward simulation to get predicted data
-        predicted_data = self.dpred(m, f=f)
-
-        # Ensure v has same shape as predicted_data
-        if v.shape != predicted_data.shape:
-            raise ValueError(
-                f"Vector v shape {v.shape} must match predicted data shape {predicted_data.shape}"
-            )
-
-        # Compute J^T * v via backward pass
-        # This computes the gradient of (v^T * predicted_data) w.r.t. m
-        predicted_data.backward(gradient=v, retain_graph=True)
-
-        return m.grad.clone()
-
 
 class Simulation3DCellCentered(BaseDcSimulation):
     def __init__(

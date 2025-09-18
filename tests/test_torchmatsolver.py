@@ -5,7 +5,6 @@ from scipy import sparse
 from simpegtorch.torchmatsolver import (
     TorchMatSolver,
     TorchMUMPSsolver,
-    batched_sparse_solve,
     batched_mumps_solve,
 )
 
@@ -156,29 +155,31 @@ def test_batched_functionality():
     values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
     A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
     b = torch.tensor([11.0, 11.0], requires_grad=True)
-    
+
     # Test single RHS
     x_single = TorchMatSolver.apply(A, b)
     assert x_single.shape == (2,)
-    
+
     # Test batched RHS
     b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
     x_batched = TorchMatSolver.apply(A, b_batched)
-    
+
     assert x_batched.shape == (3, 2)  # Should return a batch of solutions
-    
+
     # Check that each solution is correct
     for i in range(3):
-        np.testing.assert_allclose(x_batched[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10)
-        
+        np.testing.assert_allclose(
+            x_batched[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10
+        )
+
     # Test gradients work with batched RHS
     A.retain_grad()
     b_batched.retain_grad()
-    
+
     x_batched_grad = TorchMatSolver.apply(A, b_batched)
     loss = torch.sum(x_batched_grad**2)
     loss.backward()
-    
+
     assert A.grad is not None
     assert b_batched.grad is not None
     assert A.grad.is_sparse
@@ -430,29 +431,31 @@ def test_mumps_batched_functionality():
     values = torch.tensor([10.0, 1.0, 1.0, 10.0], requires_grad=True)
     A = torch.sparse_coo_tensor(indices, values, (2, 2), requires_grad=True)
     b = torch.tensor([11.0, 11.0], requires_grad=True)
-    
+
     # Test single RHS
     x_single = TorchMUMPSsolver.apply(A, b)
     assert x_single.shape == (2,)
-    
+
     # Test batched RHS
     b_batched = b.unsqueeze(0).repeat(3, 1)  # Batch of 3 identical vectors
     x_batched = TorchMUMPSsolver.apply(A, b_batched)
-    
+
     assert x_batched.shape == (3, 2)  # Should return a batch of solutions
-    
+
     # Check that each solution is correct
     for i in range(3):
-        np.testing.assert_allclose(x_batched[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10)
-        
+        np.testing.assert_allclose(
+            x_batched[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10
+        )
+
     # Test gradients work with batched RHS
     A.retain_grad()
     b_batched.retain_grad()
-    
+
     x_batched_grad = TorchMUMPSsolver.apply(A, b_batched)
     loss = torch.sum(x_batched_grad**2)
     loss.backward()
-    
+
     assert A.grad is not None
     assert b_batched.grad is not None
     assert A.grad.is_sparse
@@ -627,4 +630,184 @@ def test_mumps_batched_rhs_optimization():
 
     print(
         f"Batched RHS optimization test passed: {num_rhs} RHS vectors solved efficiently"
+    )
+
+
+def test_cartesian_product_batching():
+    """Test Cartesian product batching: batched A × batched b → (batch_A, batch_B, n)"""
+    # Create simple test system
+    n = 3
+    batch_A = 2  # 2 different matrices
+    batch_B = 3  # 3 different RHS vectors
+
+    # Create batched A matrices
+    A_list = []
+    for i in range(batch_A):
+        # Create different matrices for each batch
+        indices = torch.tensor([[0, 0, 1, 1, 2], [0, 1, 0, 1, 2]], dtype=torch.long)
+        values = torch.tensor([4.0 + i, 1.0, 1.0, 3.0 + i, 2.0 + i], requires_grad=True)
+        A_i = torch.sparse_coo_tensor(indices, values, (n, n), requires_grad=True)
+        A_list.append(A_i)
+    A_batched = torch.stack(A_list)  # Shape: (batch_A, n, n)
+
+    # Create batched b vectors
+    b_batched = torch.tensor(
+        [[1.0, 2.0, 3.0], [2.0, 1.0, 4.0], [3.0, 3.0, 1.0]], requires_grad=True
+    )  # Shape: (batch_B, n)
+
+    # Test Cartesian product solving
+    x_cartesian = TorchMatSolver.apply(A_batched, b_batched)
+
+    # Should get shape (batch_A, batch_B, n)
+    assert x_cartesian.shape == (batch_A, batch_B, n)
+
+    # Verify each solution is correct by solving individually
+    for i in range(batch_A):
+        for j in range(batch_B):
+            x_single = TorchMatSolver.apply(A_batched[i], b_batched[j])
+            np.testing.assert_allclose(
+                x_cartesian[i, j].detach().numpy(),
+                x_single.detach().numpy(),
+                rtol=1e-10,
+            )
+
+    # Test gradients work
+    A_batched.retain_grad()
+    b_batched.retain_grad()
+
+    loss = torch.sum(x_cartesian**2)
+    loss.backward()
+
+    assert A_batched.grad is not None
+    assert b_batched.grad is not None
+    assert A_batched.grad.shape == A_batched.shape
+    assert b_batched.grad.shape == b_batched.shape
+
+    print(
+        f"Cartesian product test passed: {batch_A}×{batch_B} combinations solved correctly"
+    )
+
+
+def test_batched_A_single_b():
+    """Test batched A × single b → (batch_A, n)"""
+    n = 3
+    batch_A = 2
+
+    # Create batched A matrices
+    A_list = []
+    for i in range(batch_A):
+        indices = torch.tensor([[0, 0, 1, 1, 2], [0, 1, 0, 1, 2]], dtype=torch.long)
+        values = torch.tensor([4.0 + i, 1.0, 1.0, 3.0 + i, 2.0 + i], requires_grad=True)
+        A_i = torch.sparse_coo_tensor(indices, values, (n, n), requires_grad=True)
+        A_list.append(A_i)
+    A_batched = torch.stack(A_list)
+
+    # Single b vector
+    b_single = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+
+    # Test batched A, single b
+    x_result = TorchMatSolver.apply(A_batched, b_single)
+
+    # Should get shape (batch_A, n)
+    assert x_result.shape == (batch_A, n)
+
+    # Verify each solution
+    for i in range(batch_A):
+        x_single = TorchMatSolver.apply(A_batched[i], b_single)
+        np.testing.assert_allclose(
+            x_result[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10
+        )
+
+    print(f"Batched A × single b test passed: {batch_A} matrices solved correctly")
+
+
+@skip_mumps
+def test_mumps_cartesian_product_batching():
+    """Test MUMPS Cartesian product batching: batched A × batched b → (batch_A, batch_B, n)"""
+    # Create simple test system
+    n = 3
+    batch_A = 2  # 2 different matrices
+    batch_B = 3  # 3 different RHS vectors
+
+    # Create batched A matrices
+    A_list = []
+    for i in range(batch_A):
+        # Create different matrices for each batch
+        indices = torch.tensor([[0, 0, 1, 1, 2], [0, 1, 0, 1, 2]], dtype=torch.long)
+        values = torch.tensor([4.0 + i, 1.0, 1.0, 3.0 + i, 2.0 + i], requires_grad=True)
+        A_i = torch.sparse_coo_tensor(indices, values, (n, n), requires_grad=True)
+        A_list.append(A_i)
+    A_batched = torch.stack(A_list)  # Shape: (batch_A, n, n)
+
+    # Create batched b vectors
+    b_batched = torch.tensor(
+        [[1.0, 2.0, 3.0], [2.0, 1.0, 4.0], [3.0, 3.0, 1.0]], requires_grad=True
+    )  # Shape: (batch_B, n)
+
+    # Test Cartesian product solving
+    x_cartesian = TorchMUMPSsolver.apply(A_batched, b_batched)
+
+    # Should get shape (batch_A, batch_B, n)
+    assert x_cartesian.shape == (batch_A, batch_B, n)
+
+    # Verify each solution is correct by solving individually
+    for i in range(batch_A):
+        for j in range(batch_B):
+            x_single = TorchMUMPSsolver.apply(A_batched[i], b_batched[j])
+            np.testing.assert_allclose(
+                x_cartesian[i, j].detach().numpy(),
+                x_single.detach().numpy(),
+                rtol=1e-10,
+            )
+
+    # Test gradients work
+    A_batched.retain_grad()
+    b_batched.retain_grad()
+
+    loss = torch.sum(x_cartesian**2)
+    loss.backward()
+
+    assert A_batched.grad is not None
+    assert b_batched.grad is not None
+    assert A_batched.grad.shape == A_batched.shape
+    assert b_batched.grad.shape == b_batched.shape
+
+    print(
+        f"MUMPS Cartesian product test passed: {batch_A}×{batch_B} combinations solved correctly"
+    )
+
+
+@skip_mumps
+def test_mumps_batched_A_single_b():
+    """Test MUMPS batched A × single b → (batch_A, n)"""
+    n = 3
+    batch_A = 2
+
+    # Create batched A matrices
+    A_list = []
+    for i in range(batch_A):
+        indices = torch.tensor([[0, 0, 1, 1, 2], [0, 1, 0, 1, 2]], dtype=torch.long)
+        values = torch.tensor([4.0 + i, 1.0, 1.0, 3.0 + i, 2.0 + i], requires_grad=True)
+        A_i = torch.sparse_coo_tensor(indices, values, (n, n), requires_grad=True)
+        A_list.append(A_i)
+    A_batched = torch.stack(A_list)
+
+    # Single b vector
+    b_single = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+
+    # Test batched A, single b
+    x_result = TorchMUMPSsolver.apply(A_batched, b_single)
+
+    # Should get shape (batch_A, n)
+    assert x_result.shape == (batch_A, n)
+
+    # Verify each solution
+    for i in range(batch_A):
+        x_single = TorchMUMPSsolver.apply(A_batched[i], b_single)
+        np.testing.assert_allclose(
+            x_result[i].detach().numpy(), x_single.detach().numpy(), rtol=1e-10
+        )
+
+    print(
+        f"MUMPS Batched A × single b test passed: {batch_A} matrices solved correctly"
     )
