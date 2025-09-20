@@ -363,13 +363,15 @@ class Survey:
 
         return indices
 
-    def get_source_tensor(self, simulation) -> torch.Tensor:
+    def get_source_tensor(self, mesh, projected_grid: str = "N") -> torch.Tensor:
         """Create batched source tensor for all sources in survey
 
         Parameters
         ----------
-        simulation : DCStaticSimulation
-            The DC resistivity simulation object
+        mesh : TensorMesh
+            The computational mesh
+        projected_grid : str, default: "N"
+            Grid locations to project from ("N" for nodes, "CC" for cell centers)
 
         Returns
         -------
@@ -381,7 +383,7 @@ class Survey:
 
         rhs_vectors = []
         for src in self.source_list:
-            rhs = src.evaluate(simulation)
+            rhs = src.evaluate(mesh, projected_grid)
             rhs_vectors.append(rhs)
 
         # Stack along source dimension (dim=0)
@@ -409,8 +411,8 @@ class Survey:
         projection_matrices = []
 
         for src in self.source_list:
-            reciever_tensor = src.build_receiver_tensor(mesh, projected_grid)
-            projection_matrices.append(reciever_tensor)
+            receiver_tensor = src.build_receiver_tensor(mesh, projected_grid)
+            projection_matrices.append(receiver_tensor)
 
         return projection_matrices
 

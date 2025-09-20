@@ -54,8 +54,8 @@ class BasePDE(ABC):
         -------
         torch.Tensor
             Batched RHS tensors. Shape depends on problem type:
-            - DC: [1, n_sources, n_cells]
-            - FDEM: [n_frequencies, n_sources, n_cells]
+            - DC: [n_sources, n_cells]
+            - FDEM: [n_sources, n_cells]
         """
         pass
 

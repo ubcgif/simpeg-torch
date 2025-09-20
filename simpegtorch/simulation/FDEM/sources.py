@@ -45,7 +45,6 @@ class BaseFDEMSrc:
 
     @frequency.setter
     def frequency(self, freq):
-        freq = freq
         self._frequency = freq
 
     def bPrimary(self, simulation):

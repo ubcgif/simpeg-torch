@@ -110,13 +110,15 @@ class BaseSrc:
         """Alias for receiver_list for compatibility"""
         return self.receiver_list
 
-    def evaluate(self, simulation):
+    def evaluate(self, mesh, projected_grid: str = "CC"):
         """Discretize source to mesh
 
         Parameters
         ----------
-        simulation : DCStaticSimulation
-            The DC resistivity simulation
+        mesh : TensorMesh
+            Discretization mesh
+        projected_grid : str, optional
+            Formulation type ("CC" for cell-centered, "N" for nodal), by default "CC"
 
         Returns
         -------
@@ -124,19 +126,9 @@ class BaseSrc:
             Right-hand side vector for this source
         """
 
-        if hasattr(simulation, "_formulation") and simulation._formulation == "EB":
-            # Nodal formulation: interpolate sources to nodes
-            return self._evaluate_nodal(simulation)
-        else:
-            # Cell-centered formulation: place sources at cell centers
-            return self._evaluate_cell_centered(simulation)
-
-    def _evaluate_cell_centered(self, simulation):
-        """Evaluate source for cell-centered formulation (HJ equivalent)"""
-        mesh = simulation.mesh
-        inds = mesh.closest_points_index(self.location, grid_loc="CC")
+        indices = mesh.closest_points_index(self.location, grid_loc=projected_grid)
         q = torch.zeros(mesh.nC, dtype=self.current.dtype, device=self.current.device)
-        q[inds] = self.current
+        q[indices] = self.current
         return q
 
     def build_receiver_tensor(self, mesh, projected_grid: str = "N"):
@@ -166,43 +158,6 @@ class BaseSrc:
         self._projection_tensor_cache[cache_key] = projection_tensor
 
         return projection_tensor
-
-    def _evaluate_nodal(self, simulation):
-        """Evaluate source for nodal formulation using interpolation"""
-        mesh = simulation.mesh
-
-        # For nodal formulation, we need to interpolate to nodes
-        # This is similar to original SimPEG's approach
-        interpolation_matrix = mesh.get_interpolation_matrix(
-            self.location, location_type="N"
-        )
-        # Use sparse matrix multiplication to preserve gradients
-        # interpolation_matrix is (n_electrodes, n_nodes)
-        # self.current is (n_electrodes,)
-        # We need to compute current^T @ interpolation_matrix
-        current_expanded = self.current.unsqueeze(0)  # (1, n_electrodes)
-        q = torch.sparse.mm(current_expanded, interpolation_matrix).squeeze(
-            0
-        )  # (n_nodes,)
-
-        return q
-
-    def evalDeriv(self, simulation):
-        """Derivative of source term w.r.t. model (always zero for sources)
-
-        Parameters
-        ----------
-        simulation : DCStaticSimulationCellCentered
-            The DC resistivity simulation
-
-        Returns
-        -------
-        torch.Tensor
-            Zero tensor, since source doesn't depend on model
-        """
-        return torch.zeros(
-            simulation.mesh.nC, dtype=torch.float64, device=simulation.mesh.device
-        )
 
 
 class Multipole(BaseSrc):
