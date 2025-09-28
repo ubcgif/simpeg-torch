@@ -25,6 +25,7 @@ Survey
 """
 
 from .simulation import Simulation3DCellCentered, Simulation3DNodal
+from .dc_pde import DC3DCellCentered, DC3DNodal
 from .sources import BaseSrc, Pole as SrcPole, Dipole as SrcDipole, Multipole
 from .receivers import BaseRx, Pole as RxPole, Dipole as RxDipole
 from .survey import Survey
@@ -44,6 +45,9 @@ __all__ = [
     # 3D simulations
     "Simulation3DCellCentered",
     "Simulation3DNodal",
+    # PDE problems
+    "DC3DCellCentered",
+    "DC3DNodal",
     # Sources
     "BaseSrc",
     "Src",

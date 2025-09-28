@@ -127,7 +127,16 @@ class BaseSrc:
         """
 
         indices = mesh.closest_points_index(self.location, grid_loc=projected_grid)
-        q = torch.zeros(mesh.nC, dtype=self.current.dtype, device=self.current.device)
+
+        # Choose the right vector size based on formulation
+        if projected_grid in ["N", "nodes"]:
+            vector_size = mesh.nN  # Number of nodes for nodal formulation
+        else:
+            vector_size = mesh.nC  # Number of cells for cell-centered formulation
+
+        q = torch.zeros(
+            vector_size, dtype=self.current.dtype, device=self.current.device
+        )
         q[indices] = self.current
         return q
 

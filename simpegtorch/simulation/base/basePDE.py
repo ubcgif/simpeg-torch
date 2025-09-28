@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import torch
 from simpegtorch.discretize.base import BaseMesh
-from mappings import BaseMapping
+from .mappings import BaseMapping
 
 
 class BasePDE(ABC):
