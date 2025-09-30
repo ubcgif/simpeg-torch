@@ -256,7 +256,7 @@ class DCSolutionTest(unittest.TestCase):
         # Get system matrices from PDE - the new architecture doesn't expose Div/Grad directly
         # since these are encapsulated in the PDE's get_system_matrices method
         A_torch = pde_torch.get_system_matrices()
-        A_torch = A_torch.squeeze(0)  # Remove batch dimension for 2D comparison
+        A_torch = A_torch[0]  # Remove batch dimension for 2D comparison
 
         D_orig = simulation_orig.Div
         G_orig = simulation_orig.Grad
@@ -271,7 +271,7 @@ class DCSolutionTest(unittest.TestCase):
 
         A_orig = D_orig @ MfRhoI_orig @ G_orig
 
-        A_torch_dense = A_torch.to_dense().numpy()
+        A_torch_dense = A_torch.to_dense().detach().numpy()
         A_orig_dense = A_orig.toarray()
 
         print("\nComparing A Matrices...")
@@ -283,3 +283,47 @@ class DCSolutionTest(unittest.TestCase):
             err_msg="A matrices are not equal.",
         )
         print("A Matrices are equal.")
+    
+    def test_compare_A_matrices_nodal(self, tolerance=1e-7):
+        self.setUp()
+        # Create PDE for new architecture
+        pde_torch = DC3DNodal(
+            self.mesh_torch,
+            self.survey_torch,
+            self.resistivity_map,
+            bc_type="Neumann",
+        )
+        sigma_map = maps.IdentityMap(nP=self.mesh_orig.nC)
+        simulation_orig = dc.Simulation3DNodal(
+            self.mesh_orig,
+            survey=self.survey_orig,
+            sigmaMap=sigma_map,
+            bc_type="Neumann",
+        )
+
+        # Get system matrices from PDE - the new architecture doesn't expose Grad directly
+        # since these are encapsulated in the PDE's get_system_matrices method
+        A_torch = pde_torch.get_system_matrices()
+        A_torch = A_torch[0]  # Remove batch dimension for 2D comparison
+
+        # Get the properly conditioned system matrix from SimPEG
+        # This includes boundary condition handling for Neumann BC
+        # Note: getA expects resistivity, not conductivity
+        A_orig = simulation_orig.getA(1.0 / self.sigma.numpy())
+
+        print(f"\nTorch A: {A_torch.dtype}, {A_torch.shape}")
+        print(f"Orig A: {A_orig.dtype}, {A_orig.shape}")
+
+        A_torch_dense = A_torch.to_dense().detach().numpy()
+        A_orig_dense = A_orig.toarray()
+
+        print("\nComparing A Matrices...")
+        np.testing.assert_allclose(
+            A_torch_dense,
+            A_orig_dense,
+            rtol=tolerance,
+            atol=tolerance,
+            err_msg="A matrices are not equal.",
+        )
+        print("A Matrices are equal.")
+
