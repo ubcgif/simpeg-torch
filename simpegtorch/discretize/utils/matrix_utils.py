@@ -40,7 +40,7 @@ def mkvc(x, n_dims=1, dtype=torch.float64, device=None):
     return x
 
 
-def sdiag(v, dtype=torch.float64, device=None, sparse_type="coo"):
+def sdiag(v, dtype=None, device=None, sparse_type="coo"):
     """
     Generate a sparse diagonal matrix from a vector using PyTorch.
 
@@ -49,9 +49,9 @@ def sdiag(v, dtype=torch.float64, device=None, sparse_type="coo"):
     v : (n,) array-like or Zero
         The vector defining the diagonal elements of the sparse matrix.
     dtype : torch.dtype, optional
-        Data type of the tensor.
+        Data type of the tensor. If None, preserves input dtype.
     device : torch.device, optional
-        Device to store the tensor on.
+        Device to store the tensor on. If None, preserves input device.
 
     sparse_type : {'csr', 'coo'}, optional
         The format of the sparse tensor. Default is 'coo'.
@@ -59,16 +59,24 @@ def sdiag(v, dtype=torch.float64, device=None, sparse_type="coo"):
     Returns
     -------
     torch.sparse.Tensor
-        A (n, n) sparse CSR diagonal tensor.
+        A (n, n) sparse diagonal tensor with preserved dtype.
     """
     if isinstance(v, Zero):
         return Zero()
 
+    # Determine dtype and device
+    if torch.is_tensor(v):
+        dtype = dtype if dtype is not None else v.dtype
+        device = device if device is not None else v.device
+    else:
+        dtype = dtype if dtype is not None else torch.float64
+        device = device if device is not None else torch.device('cpu')
+
     # Preserve gradient flow by checking if tensor already has the right properties
     if (
         torch.is_tensor(v)
-        and v.device == (device or v.device)
-        and v.dtype == (dtype or v.dtype)
+        and v.device == device
+        and v.dtype == dtype
     ):
         # Don't convert if already correct to preserve gradients
         pass
@@ -554,7 +562,21 @@ class SparseDiagInverse(torch.autograd.Function):
         if grad_output.is_sparse_csr:
             grad_output = grad_output.to_sparse_coo()
 
-        grad_output = grad_output.coalesce()
+        if grad_output.is_sparse:
+            grad_output = grad_output.coalesce()
+        else:
+            # If dense, extract diagonal elements
+            grad_diag_values = grad_output.diag()[indices[0]]
+            # For diagonal matrix inversion, d/dx(1/x) = -1/x^2
+            grad_input_values = -grad_diag_values * (inv_values**2)
+            grad_input = torch.sparse_coo_tensor(
+                indices,
+                grad_input_values,
+                shape,
+                dtype=grad_input_values.dtype,
+                device=grad_input_values.device,
+            ).coalesce()
+            return grad_input
 
         # Extract only the diagonal values from grad_output
         grad_indices = grad_output._indices()
@@ -1432,19 +1454,44 @@ def get_subarray(A, ind):
 
 
 def make_property_tensor(
-    mesh, tensor, dtype=torch.float64, device=None, sparse_type="coo"
+    mesh, tensor, dtype=None, device=None, sparse_type="coo"
 ):
-    """Construct the physical property tensor."""
+    """Construct the physical property tensor.
+
+    Parameters
+    ----------
+    mesh : BaseMesh
+        The mesh object
+    tensor : torch.Tensor, float, or None
+        The property tensor values
+    dtype : torch.dtype, optional
+        Target dtype. If None, preserves input dtype or uses mesh.dtype
+    device : torch.device, optional
+        Target device. If None, uses mesh.device
+    sparse_type : str
+        Type of sparse tensor to return ('coo' or 'csr')
+
+    Returns
+    -------
+    torch.Tensor
+        Sparse property tensor with preserved dtype
+    """
     n_cells = mesh.n_cells
     dim = mesh.dim
     device = mesh.device if device is None else device
-    dtype = mesh.dtype if dtype is None else dtype
 
+    # Determine dtype: preserve input dtype if not specified
     if tensor is None:
+        dtype = mesh.dtype if dtype is None else dtype
         tensor = torch.ones(n_cells, device=device, dtype=dtype)
     elif is_scalar(tensor):
+        dtype = mesh.dtype if dtype is None else dtype
         tensor = tensor * torch.ones(n_cells, device=device, dtype=dtype)
     else:
+        # If dtype not specified, preserve the input tensor's dtype
+        if dtype is None:
+            dtype = tensor.dtype if torch.is_tensor(tensor) else mesh.dtype
+
         # Preserve gradient flow by checking if tensor already has the right properties
         if (
             torch.is_tensor(tensor)

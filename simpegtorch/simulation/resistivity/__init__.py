@@ -6,9 +6,10 @@ for automatic differentiation and GPU acceleration.
 
 Classes
 -------
-3D Simulations
-    Simulation3DCellCentered - 3D cell-centered finite volume DC resistivity simulation
-    Simulation3DNodal - 3D nodal finite difference DC resistivity simulation
+PDE Formulations (New Framework)
+    DC3DCellCentered - 3D cell-centered finite volume DC resistivity PDE
+    DC3DNodal - 3D nodal finite difference DC resistivity PDE
+
 Sources
     BaseSrc - Base source class
     Pole - Pole source (single electrode)
@@ -22,30 +23,29 @@ Receivers
 
 Survey
     Survey - Container for sources and receivers with geometric factors
+
+Usage
+-----
+Use DC3DCellCentered or DC3DNodal with DirectSolver:
+
+    >>> from simpegtorch.simulation.resistivity import DC3DCellCentered, Survey
+    >>> from simpegtorch.simulation.base import DirectSolver, mappings
+    >>> pde = DC3DCellCentered(mesh, survey, mapping)
+    >>> solver = DirectSolver(pde)
+    >>> data = solver.forward()
 """
 
-from .simulation import Simulation3DCellCentered, Simulation3DNodal
 from .dc_pde import DC3DCellCentered, DC3DNodal
 from .sources import BaseSrc, Pole as SrcPole, Dipole as SrcDipole, Multipole
 from .receivers import BaseRx, Pole as RxPole, Dipole as RxDipole
 from .survey import Survey
 
-# Main simulation class
-Simulation = Simulation3DCellCentered
-
-# Aliases for common usage patterns and backward compatibility
-Simulation3DCellCentered = Simulation3DCellCentered
-Simulation3DNodal = Simulation3DNodal
+# Aliases for common usage patterns
 Src = BaseSrc
 Rx = BaseRx
 
 __all__ = [
-    # Main simulation
-    "Simulation",
-    # 3D simulations
-    "Simulation3DCellCentered",
-    "Simulation3DNodal",
-    # PDE problems
+    # PDE formulations
     "DC3DCellCentered",
     "DC3DNodal",
     # Sources
