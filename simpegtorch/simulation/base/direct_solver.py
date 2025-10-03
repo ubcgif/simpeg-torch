@@ -36,17 +36,14 @@ class DirectSolver(nn.Module):
 
         Solves the PDE using a direct solver through matrixn inversion.
         Total process:
-        1. Gets a RHS tensor of shape 1xkxn for n parameters problem and k different sources
-        2. Gets a A matrix tensor of fx1xnxn for n parameterrs and f different problems (e.g. different frequencies)
+        1. Gets a RHS tensor of shape fxkxn for n parameters problem and k different sources
+        2. Gets a A matrix tensor of fxnxn for n parameterrs and f different problems (e.g. different frequencies)
         3. Runs a direct solver over this to solve for a fxkxn field solution tensor
         4. for j different receivers projects the fields into fxj different measurements
         """
-        # 1. Apply mapping if provided
 
-        # 2. Get system matrices from PDE
         system_matrices = self.pde.get_system_matrices()
 
-        # 3. Get RHS vectors from PDE
         rhs_tensors = self.pde.get_rhs_tensors()
 
         try:
@@ -55,5 +52,4 @@ class DirectSolver(nn.Module):
             print("MUMPS not installed, falling back")
             fields = batched_sparse_solve(system_matrices, rhs_tensors)
 
-        # 5. Project to data and return
         return self.pde.fields_to_data(fields)

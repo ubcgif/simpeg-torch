@@ -35,8 +35,6 @@ from simpegtorch.simulation.FDEM import (
 )
 from simpegtorch.simulation.base import DirectSolver, mappings
 
-from simpegtorch.discretize.utils import ndgrid
-
 ## Import the same functions from original simpeg
 from simpeg.electromagnetics import frequency_domain as fdem
 from discretize import TensorMesh as OriginalTensorMesh
@@ -124,7 +122,9 @@ class FDEMSolutionTest(unittest.TestCase):
         survey_orig = fdem.Survey([src_orig])
         self.survey_orig = survey_orig
 
-    @pytest.mark.xfail(reason="Absolute value discrepancy with SimPEG - likely due to source normalization or field definition differences")
+    @pytest.mark.xfail(
+        reason="Absolute value discrepancy with SimPEG - likely due to source normalization or field definition differences"
+    )
     def test_fdem_magnetic_flux_density_fields(self, tolerance=0.15):
         """Test FDEM simulation comparing with original SimPEG.
 
@@ -202,7 +202,9 @@ class FDEMSolutionTest(unittest.TestCase):
             err_msg="Individual data values differ beyond tolerance",
         )
 
-    @pytest.mark.xfail(reason="Absolute value discrepancy with SimPEG - see test_fdem_magnetic_flux_density_fields")
+    @pytest.mark.xfail(
+        reason="Absolute value discrepancy with SimPEG - see test_fdem_magnetic_flux_density_fields"
+    )
     def test_fdem_multiple_frequencies(self, tolerance=0.15):
         """Test FDEM simulation with multiple frequencies."""
         self.setUp()
@@ -270,9 +272,7 @@ class FDEMSolutionTest(unittest.TestCase):
             data_orig
         )
 
-        print(
-            f"Multi-frequency relative error: {relative_error:.6f}"
-        )
+        print(f"Multi-frequency relative error: {relative_error:.6f}")
         print(f"Number of frequencies: {len(frequencies)}")
         print(f"Total data points: {len(data_torch_np)}")
 
@@ -337,15 +337,25 @@ class FDEMSolutionTest(unittest.TestCase):
         test_vec = torch.randn(A_torch.shape[1], dtype=torch.complex128)
         result_torch = A_torch @ test_vec
 
-        print(f"System matrix construction successful")
-        print(f"Test: A @ random_vector produces expected shape: {result_torch.shape == A_torch.shape[:1]}")
+        print("System matrix construction successful")
+        print(
+            f"Test: A @ random_vector produces expected shape: {result_torch.shape == A_torch.shape[:1]}"
+        )
 
         # Verify matrix properties
-        self.assertEqual(A_torch.shape[0], A_torch.shape[1], "System matrix should be square")
-        self.assertEqual(A_torch.shape[0], self.mesh_torch.n_faces, "System matrix size should match number of faces")
+        self.assertEqual(
+            A_torch.shape[0], A_torch.shape[1], "System matrix should be square"
+        )
+        self.assertEqual(
+            A_torch.shape[0],
+            self.mesh_torch.n_faces,
+            "System matrix size should match number of faces",
+        )
         self.assertTrue(A_torch.is_complex(), "FDEM system matrix should be complex")
 
-    @pytest.mark.xfail(reason="Absolute value discrepancy with SimPEG - see test_fdem_magnetic_flux_density_fields")
+    @pytest.mark.xfail(
+        reason="Absolute value discrepancy with SimPEG - see test_fdem_magnetic_flux_density_fields"
+    )
     def test_fdem_with_heterogeneous_model(self, tolerance=0.15):
         """Test FDEM with a heterogeneous conductivity model."""
         self.setUp()
@@ -396,9 +406,7 @@ class FDEMSolutionTest(unittest.TestCase):
             data_orig
         )
 
-        print(
-            f"Heterogeneous model relative error: {relative_error:.6f}"
-        )
+        print(f"Heterogeneous model relative error: {relative_error:.6f}")
         print(f"Conductivity range: [{sigma.min():.3e}, {sigma.max():.3e}] S/m")
 
         # Assert that the results are close
@@ -414,7 +422,6 @@ class FDEMSolutionTest(unittest.TestCase):
             rtol=tolerance,
             err_msg="Heterogeneous model data values differ beyond tolerance",
         )
-
 
     def test_fdem_implementation_sanity_checks(self):
         """Sanity checks that the FDEM implementation works correctly."""
@@ -432,13 +439,28 @@ class FDEMSolutionTest(unittest.TestCase):
         data_torch = solver_torch.forward()
 
         # Basic sanity checks
-        self.assertEqual(data_torch.shape[0], len(self.rx_locations), "Should have one data point per receiver")
-        self.assertTrue(torch.all(torch.isfinite(data_torch)), "All data values should be finite")
-        self.assertTrue(data_torch.dtype == torch.float64, "Data should be real-valued (we're measuring real component)")
+        self.assertEqual(
+            data_torch.shape[0],
+            len(self.rx_locations),
+            "Should have one data point per receiver",
+        )
+        self.assertTrue(
+            torch.all(torch.isfinite(data_torch)), "All data values should be finite"
+        )
+        self.assertTrue(
+            data_torch.dtype == torch.float64,
+            "Data should be real-valued (we're measuring real component)",
+        )
 
         # Check that data values are reasonable (most non-zero, not huge)
-        self.assertTrue(torch.any(torch.abs(data_torch) > 1e-10), "At least some data values should be non-zero")
-        self.assertTrue(torch.all(torch.abs(data_torch) < 1.0), "Data values should be reasonable magnitude")
+        self.assertTrue(
+            torch.any(torch.abs(data_torch) > 1e-10),
+            "At least some data values should be non-zero",
+        )
+        self.assertTrue(
+            torch.all(torch.abs(data_torch) < 1.0),
+            "Data values should be reasonable magnitude",
+        )
 
         # Test that the implementation supports gradients
         sigma_with_grad = torch.ones(self.mesh_torch.n_cells, requires_grad=True) * 0.01
@@ -456,7 +478,10 @@ class FDEMSolutionTest(unittest.TestCase):
         # Check gradients through the mapping's trainable parameters
         grad_params = sigma_map_grad.trainable_parameters
         self.assertIsNotNone(grad_params.grad, "Gradients should be computed")
-        self.assertTrue(torch.all(torch.isfinite(grad_params.grad)), "All gradients should be finite")
+        self.assertTrue(
+            torch.all(torch.isfinite(grad_params.grad)),
+            "All gradients should be finite",
+        )
         print("✓ FDEM implementation sanity checks passed")
 
 
