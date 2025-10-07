@@ -38,8 +38,22 @@ class BaseFDEMReceiver:
         """Number of data points"""
         return self.locations.shape[0]
 
-    def evaluate(self, fields, simulation):
-        """Extract data from fields at receiver locations"""
+    def evaluate(self, fields, pde):
+        """
+        Extract data from fields at receiver locations.
+
+        Parameters
+        ----------
+        fields : torch.Tensor
+            Fields for a single source, shape (n_grid_points,)
+        pde : BasePDE
+            The PDE object (provides mesh and formulation info)
+
+        Returns
+        -------
+        torch.Tensor
+            Data at receiver locations, shape (nD,)
+        """
         raise NotImplementedError("evaluate must be implemented in derived classes")
 
     def _get_projection_matrix(self, mesh, projected_grid):
@@ -76,24 +90,24 @@ class BaseFDEMReceiver:
 class PointMagneticFluxDensity(BaseFDEMReceiver):
     """Point receiver for magnetic flux density measurements."""
 
-    def evaluate(self, fields, simulation):
+    def evaluate(self, fields, pde):
         """
         Extract magnetic flux density at receiver locations.
 
         Parameters
         ----------
         fields : torch.Tensor
-            Computed fields from simulation (n_faces,)
-        simulation : BaseFDEMSimulation
-            FDEM simulation object
+            Computed fields for a single source, shape (n_grid_points,)
+        pde : BasePDE
+            The PDE object (provides mesh)
 
         Returns
         -------
         torch.Tensor
-            Data at receiver locations
+            Data at receiver locations, shape (nD,)
         """
         # Get projection matrix using component-wise interpolation (like SimPEG)
-        P = self._get_projection_matrix(simulation.mesh, "faces_")
+        P = self._get_projection_matrix(pde.mesh, "faces_")
 
         # Interpolate fields to receiver locations
         b_interp = P @ fields
@@ -108,10 +122,10 @@ class PointMagneticFluxDensity(BaseFDEMReceiver):
 class PointMagneticFluxDensitySecondary(PointMagneticFluxDensity):
     """Point receiver for secondary magnetic flux density measurements."""
 
-    def evaluate(self, fields, simulation):
+    def evaluate(self, fields, pde):
         """Extract secondary magnetic flux density (total - primary)"""
         # Get total field
-        b_total = super().evaluate(fields, simulation)
+        b_total = super().evaluate(fields, pde)
 
         # Get primary field from source
         # For now, assume primary field is negligible (air/vacuum background)
@@ -124,7 +138,7 @@ class PointMagneticFluxDensitySecondary(PointMagneticFluxDensity):
 class PointElectricField(BaseFDEMReceiver):
     """Point receiver for electric field measurements."""
 
-    def evaluate(self, fields, simulation):
+    def evaluate(self, fields, pde):
         """
         Extract electric field at receiver locations.
 
@@ -132,11 +146,13 @@ class PointElectricField(BaseFDEMReceiver):
         E = -iωμ⁻¹∇×B
         """
         # Get curl matrix
-        C = simulation.mesh.edge_curl.to(dtype=torch.complex128)
+        C = pde.mesh.edge_curl.to(dtype=torch.complex128)
 
         # Compute electric field from magnetic flux density
         # E = -iω * μ⁻¹ * C.T * B
-        freq = getattr(simulation, "_current_freq", 1.0)  # Need current frequency
+        # Note: For multi-frequency, need to track which frequency this field is from
+        # For now, use first frequency (this will need refinement)
+        freq = pde.survey.frequencies[0] if hasattr(pde, "survey") else 1.0
         omega = 2 * torch.pi * freq
 
         # Get permeability (assume vacuum for now)
@@ -145,7 +161,7 @@ class PointElectricField(BaseFDEMReceiver):
         e_field = -1j * omega / mu0 * (C.T @ fields)
 
         # Interpolate to receiver locations
-        P = self._get_projection_matrix(simulation.mesh, "edges_")
+        P = self._get_projection_matrix(pde.mesh, "edges_")
 
         e_interp = P @ e_field
 

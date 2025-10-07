@@ -12,6 +12,20 @@ class Survey:
 
     def __init__(self, source_list):
         self.source_list = source_list if source_list is not None else []
+        self._frequency_dict = None
+        self._frequencies = None
+        self._organize_by_frequency()
+
+    def _organize_by_frequency(self):
+        """Organize sources by frequency (like original SimPEG)"""
+        _frequency_dict = {}
+        for src in self.source_list:
+            if src.frequency not in _frequency_dict:
+                _frequency_dict[src.frequency] = []
+            _frequency_dict[src.frequency].append(src)
+
+        self._frequency_dict = _frequency_dict
+        self._frequencies = sorted(list(_frequency_dict.keys()))
 
     @property
     def frequencies(self):
@@ -23,8 +37,9 @@ class Survey:
         list
             Sorted list of unique frequencies
         """
-        freqs = [src.frequency for src in self.source_list]
-        return sorted(list(set(freqs)))
+        if self._frequencies is None:
+            self._organize_by_frequency()
+        return self._frequencies
 
     @property
     def nD(self):
@@ -69,7 +84,9 @@ class Survey:
         list
             List of sources at the specified frequency
         """
-        return [src for src in self.source_list if src.frequency == freq]
+        if self._frequency_dict is None:
+            self._organize_by_frequency()
+        return self._frequency_dict.get(freq, [])
 
     def get_data_indices(self):
         """
@@ -101,6 +118,59 @@ class Survey:
             factors are applied.
         """
         self.geometric_factor = geometric_factor
+
+    def get_source_tensor(self, mesh, formulation="EB"):
+        """
+        Get source tensors organized by frequency.
+
+        This method returns a dict mapping each frequency to its source RHS tensors.
+        The RHS tensors are organized as (n_sources_at_freq, n_grid_points).
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        formulation : str, default: "EB"
+            Formulation type: "EB" or "HJ"
+
+        Returns
+        -------
+        dict
+            Dictionary mapping frequency -> RHS tensor (n_sources, n_grid_points)
+        """
+        import torch
+
+        if self._frequency_dict is None:
+            self._organize_by_frequency()
+
+        source_tensors = {}
+
+        for freq in self.frequencies:
+            sources = self.get_sources_by_frequency(freq)
+            rhs_list = []
+
+            for src in sources:
+                # Get source terms (s_m, s_e) for this source
+                s_m, s_e = src.evaluate(mesh, formulation)
+
+                # Combine source terms based on formulation
+                # For now, we'll use the primary field (s_m for EB, s_e for HJ)
+                # This matches the structure in fdem_pde.get_rhs_tensors()
+                if formulation == "EB":
+                    # For EB formulation, the primary unknown is on faces (B field)
+                    rhs = s_m  # Shape: (n_faces,)
+                elif formulation == "HJ":
+                    # For HJ formulation, the primary unknown is on edges (H field)
+                    rhs = s_m  # Shape: (n_edges,)
+                else:
+                    raise ValueError(f"Unknown formulation: {formulation}")
+
+                rhs_list.append(rhs)
+
+            # Stack all sources for this frequency: (n_sources_at_freq, n_grid_points)
+            source_tensors[freq] = torch.stack(rhs_list, dim=0)
+
+        return source_tensors
 
     def __len__(self):
         """Number of sources"""

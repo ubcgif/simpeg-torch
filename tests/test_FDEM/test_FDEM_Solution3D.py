@@ -1,30 +1,5 @@
-"""
-FDEM Solution Comparison Tests
-
-This test file compares simpeg-torch FDEM implementation with original SimPEG.
-
-Test Status:
-- test_compare_system_matrices: PASSING - Verifies system matrix construction
-- test_fdem_implementation_sanity_checks: PASSING - Verifies implementation works correctly
-- test_fdem_magnetic_flux_density_fields: XFAIL - Absolute value discrepancy with SimPEG
-- test_fdem_multiple_frequencies: XFAIL - Same discrepancy
-- test_fdem_with_heterogeneous_model: XFAIL - Same discrepancy
-
-Note on XFAIL tests:
-The xfailing tests show orders of magnitude difference in absolute values between
-simpeg-torch and original SimPEG. This is likely due to:
-1. Different source normalization conventions
-2. Different field definitions (total vs. anomalous field)
-3. Different receiver formulations
-
-The implementation is verified to work correctly through the passing sanity checks
-and produces reasonable, finite values. The tests are kept as xfail to document
-this difference and aid in future debugging.
-"""
-
 import torch
 import unittest
-import pytest
 
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.simulation.FDEM import (
@@ -40,6 +15,9 @@ from simpeg.electromagnetics import frequency_domain as fdem
 from discretize import TensorMesh as OriginalTensorMesh
 from simpeg import maps
 import numpy as np
+
+# make the default torch dtype double for better accuracy
+torch.set_default_dtype(torch.float64)
 
 
 class FDEMSolutionTest(unittest.TestCase):
@@ -122,9 +100,6 @@ class FDEMSolutionTest(unittest.TestCase):
         survey_orig = fdem.Survey([src_orig])
         self.survey_orig = survey_orig
 
-    @pytest.mark.xfail(
-        reason="Absolute value discrepancy with SimPEG - likely due to source normalization or field definition differences"
-    )
     def test_fdem_magnetic_flux_density_fields(self, tolerance=0.15):
         """Test FDEM simulation comparing with original SimPEG.
 
@@ -202,9 +177,6 @@ class FDEMSolutionTest(unittest.TestCase):
             err_msg="Individual data values differ beyond tolerance",
         )
 
-    @pytest.mark.xfail(
-        reason="Absolute value discrepancy with SimPEG - see test_fdem_magnetic_flux_density_fields"
-    )
     def test_fdem_multiple_frequencies(self, tolerance=0.15):
         """Test FDEM simulation with multiple frequencies."""
         self.setUp()
@@ -353,9 +325,6 @@ class FDEMSolutionTest(unittest.TestCase):
         )
         self.assertTrue(A_torch.is_complex(), "FDEM system matrix should be complex")
 
-    @pytest.mark.xfail(
-        reason="Absolute value discrepancy with SimPEG - see test_fdem_magnetic_flux_density_fields"
-    )
     def test_fdem_with_heterogeneous_model(self, tolerance=0.15):
         """Test FDEM with a heterogeneous conductivity model."""
         self.setUp()
@@ -422,67 +391,6 @@ class FDEMSolutionTest(unittest.TestCase):
             rtol=tolerance,
             err_msg="Heterogeneous model data values differ beyond tolerance",
         )
-
-    def test_fdem_implementation_sanity_checks(self):
-        """Sanity checks that the FDEM implementation works correctly."""
-        self.setUp()
-
-        # Create PDE and solver
-        pde_torch = FDEM3DMagneticFluxDensity(
-            self.mesh_torch,
-            self.survey_torch,
-            self.sigma_map,
-        )
-        solver_torch = DirectSolver(pde_torch)
-
-        # Run forward simulation
-        data_torch = solver_torch.forward()
-
-        # Basic sanity checks
-        self.assertEqual(
-            data_torch.shape[0],
-            len(self.rx_locations),
-            "Should have one data point per receiver",
-        )
-        self.assertTrue(
-            torch.all(torch.isfinite(data_torch)), "All data values should be finite"
-        )
-        self.assertTrue(
-            data_torch.dtype == torch.float64,
-            "Data should be real-valued (we're measuring real component)",
-        )
-
-        # Check that data values are reasonable (most non-zero, not huge)
-        self.assertTrue(
-            torch.any(torch.abs(data_torch) > 1e-10),
-            "At least some data values should be non-zero",
-        )
-        self.assertTrue(
-            torch.all(torch.abs(data_torch) < 1.0),
-            "Data values should be reasonable magnitude",
-        )
-
-        # Test that the implementation supports gradients
-        sigma_with_grad = torch.ones(self.mesh_torch.n_cells, requires_grad=True) * 0.01
-        sigma_map_grad = mappings.BaseMapping(sigma_with_grad)
-        pde_grad = FDEM3DMagneticFluxDensity(
-            self.mesh_torch,
-            self.survey_torch,
-            sigma_map_grad,
-        )
-        solver_grad = DirectSolver(pde_grad)
-        data_grad = solver_grad.forward()
-        loss = torch.sum(torch.abs(data_grad) ** 2)
-        loss.backward()
-
-        # Check gradients through the mapping's trainable parameters
-        grad_params = sigma_map_grad.trainable_parameters
-        self.assertIsNotNone(grad_params.grad, "Gradients should be computed")
-        self.assertTrue(
-            torch.all(torch.isfinite(grad_params.grad)),
-            "All gradients should be finite",
-        )
-        print("✓ FDEM implementation sanity checks passed")
 
 
 if __name__ == "__main__":

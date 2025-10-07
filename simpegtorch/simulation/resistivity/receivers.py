@@ -203,68 +203,6 @@ class BaseRx:
 
         return data
 
-    def evalDeriv(
-        self,
-        src,
-        mesh,
-        f: torch.Tensor,
-        v: Optional[torch.Tensor] = None,
-        adjoint: bool = False,
-    ) -> torch.Tensor:
-        """Derivative of receiver evaluation w.r.t. model
-
-        Parameters
-        ----------
-        src : BaseSrc
-            Source object
-        mesh : TensorMesh
-            Computational mesh
-        f : torch.Tensor
-            Field solution
-        v : torch.Tensor, optional
-            Vector for matrix-vector product
-        adjoint : bool, default: False
-            Return adjoint operation
-
-        Returns
-        -------
-        torch.Tensor
-            Derivative operation result
-        """
-        # Determine projected grid
-        if self.orientation is not None:
-            projected_grid = f"edges_{self.orientation}"
-        else:
-            projected_grid = "CC" if self.projField == "phi" else self.projField
-
-        P = self.getP(mesh, projected_grid)
-
-        # Handle apparent resistivity scaling
-        factor = None
-        if self.data_type == "apparent_resistivity":
-            if src.uid in self.geometric_factor:
-                factor = 1.0 / self.geometric_factor[src.uid]
-            else:
-                raise KeyError("Geometric factor not set for apparent resistivity")
-
-        if v is None:
-            # Return projection matrix
-            if factor is not None:
-                P = torch.diag(factor) @ P
-            return P.T if adjoint else P
-
-        # Matrix-vector product
-        if not adjoint:
-            result = P @ v
-            if factor is not None:
-                result = factor * result
-        else:
-            if factor is not None:
-                v = factor * v
-            result = P.T @ v
-
-        return result
-
 
 class Dipole(BaseRx):
     """Dipole receiver with M and N electrodes

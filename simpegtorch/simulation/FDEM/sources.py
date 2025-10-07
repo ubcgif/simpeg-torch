@@ -134,14 +134,16 @@ class BaseFDEMSrc:
             return Zero()
         return self._jPrimary
 
-    def evaluate(self, simulation):
+    def evaluate(self, mesh, formulation="EB"):
         """
         Return source terms for this source.
 
         Parameters
         ----------
-        simulation : BaseFDEMSimulation
-            FDEM simulation object
+        mesh : TensorMesh
+            The computational mesh
+        formulation : str, default: "EB"
+            Formulation type: "EB" for E-B formulation or "HJ" for H-J formulation
 
         Returns
         -------
@@ -188,28 +190,42 @@ class MagneticDipole(BaseFDEMSrc):
             else:
                 self.moment = torch.tensor(moment, dtype=torch.float64)
 
-    def evaluate(self, simulation):
+    def evaluate(self, mesh, formulation="EB"):
         """
         Evaluate magnetic dipole source terms.
 
         Returns source terms for the magnetic dipole at the specified location.
         For EB formulation, the magnetic dipole contributes to the magnetic source term.
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        formulation : str, default: "EB"
+            Formulation type: "EB" or "HJ"
+
+        Returns
+        -------
+        s_m : torch.Tensor
+            Magnetic source terms
+        s_e : torch.Tensor
+            Electric source terms
         """
         # Initialize source vectors
-        if simulation._formulation == "EB":
-            s_m = torch.zeros(simulation.mesh.n_faces, dtype=torch.complex128)
-            s_e = torch.zeros(simulation.mesh.n_edges, dtype=torch.complex128)
-        elif simulation._formulation == "HJ":
-            s_m = torch.zeros(simulation.mesh.n_edges, dtype=torch.complex128)
-            s_e = torch.zeros(simulation.mesh.n_faces, dtype=torch.complex128)
+        if formulation == "EB":
+            s_m = torch.zeros(mesh.n_faces, dtype=torch.complex128)
+            s_e = torch.zeros(mesh.n_edges, dtype=torch.complex128)
+        elif formulation == "HJ":
+            s_m = torch.zeros(mesh.n_edges, dtype=torch.complex128)
+            s_e = torch.zeros(mesh.n_faces, dtype=torch.complex128)
         else:
-            raise ValueError(f"Unknown formulation: {simulation._formulation}")
+            raise ValueError(f"Unknown formulation: {formulation}")
 
         if self.location is not None:
             # Find closest face/edge to source location
-            if simulation._formulation == "EB":
+            if formulation == "EB":
                 # For EB formulation, magnetic sources go on faces
-                face_centers = simulation.mesh.faces
+                face_centers = mesh.faces
                 distances = torch.norm(face_centers - self.location, dim=1)
                 closest_idx = torch.argmin(distances)
 
@@ -217,9 +233,9 @@ class MagneticDipole(BaseFDEMSrc):
                 # In practice, you'd want better interpolation
                 s_m[closest_idx] = self.moment[2]  # Assuming z-oriented for now
 
-            elif simulation._formulation == "HJ":
+            elif formulation == "HJ":
                 # For HJ formulation, magnetic sources go on edges
-                edge_centers = simulation.mesh.edges
+                edge_centers = mesh.edges
                 distances = torch.norm(edge_centers - self.location, dim=1)
                 closest_idx = torch.argmin(distances)
                 s_m[closest_idx] = self.moment[2]
@@ -262,36 +278,50 @@ class ElectricDipole(BaseFDEMSrc):
         self.length = length
         self.orientation = orientation
 
-    def evaluate(self, simulation):
+    def evaluate(self, mesh, formulation="EB"):
         """
         Evaluate electric dipole source terms.
 
         For EB formulation, electric dipole contributes to electric source term.
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        formulation : str, default: "EB"
+            Formulation type: "EB" or "HJ"
+
+        Returns
+        -------
+        s_m : torch.Tensor
+            Magnetic source terms
+        s_e : torch.Tensor
+            Electric source terms
         """
         # Initialize source vectors
-        if simulation._formulation == "EB":
-            s_m = torch.zeros(simulation.mesh.n_faces, dtype=torch.complex128)
-            s_e = torch.zeros(simulation.mesh.n_edges, dtype=torch.complex128)
-        elif simulation._formulation == "HJ":
-            s_m = torch.zeros(simulation.mesh.n_edges, dtype=torch.complex128)
-            s_e = torch.zeros(simulation.mesh.n_faces, dtype=torch.complex128)
+        if formulation == "EB":
+            s_m = torch.zeros(mesh.n_faces, dtype=torch.complex128)
+            s_e = torch.zeros(mesh.n_edges, dtype=torch.complex128)
+        elif formulation == "HJ":
+            s_m = torch.zeros(mesh.n_edges, dtype=torch.complex128)
+            s_e = torch.zeros(mesh.n_faces, dtype=torch.complex128)
         else:
-            raise ValueError(f"Unknown formulation: {simulation._formulation}")
+            raise ValueError(f"Unknown formulation: {formulation}")
 
         if self.location is not None:
             # Electric dipole moment
             dipole_moment = self.current * self.length
 
-            if simulation._formulation == "EB":
+            if formulation == "EB":
                 # For EB formulation, electric sources go on edges
-                edge_centers = simulation.mesh.edges
+                edge_centers = mesh.edges
                 distances = torch.norm(edge_centers - self.location, dim=1)
                 closest_idx = torch.argmin(distances)
                 s_e[closest_idx] = dipole_moment
 
-            elif simulation._formulation == "HJ":
+            elif formulation == "HJ":
                 # For HJ formulation, electric sources go on faces
-                face_centers = simulation.mesh.faces
+                face_centers = mesh.faces
                 distances = torch.norm(face_centers - self.location, dim=1)
                 closest_idx = torch.argmin(distances)
                 s_e[closest_idx] = dipole_moment
@@ -338,21 +368,35 @@ class LoopSource(BaseFDEMSrc):
         self.orientation = orientation
         self.n_segments = n_segments
 
-    def evaluate(self, simulation):
+    def evaluate(self, mesh, formulation="EB"):
         """
         Evaluate loop source terms.
 
         Discretizes the loop into line segments and treats each as a small electric dipole.
+
+        Parameters
+        ----------
+        mesh : TensorMesh
+            The computational mesh
+        formulation : str, default: "EB"
+            Formulation type: "EB" or "HJ"
+
+        Returns
+        -------
+        s_m : torch.Tensor
+            Magnetic source terms
+        s_e : torch.Tensor
+            Electric source terms
         """
         # Initialize source vectors
-        if simulation._formulation == "EB":
-            s_m = torch.zeros(simulation.mesh.n_faces, dtype=torch.complex128)
-            s_e = torch.zeros(simulation.mesh.n_edges, dtype=torch.complex128)
-        elif simulation._formulation == "HJ":
-            s_m = torch.zeros(simulation.mesh.n_edges, dtype=torch.complex128)
-            s_e = torch.zeros(simulation.mesh.n_faces, dtype=torch.complex128)
+        if formulation == "EB":
+            s_m = torch.zeros(mesh.n_faces, dtype=torch.complex128)
+            s_e = torch.zeros(mesh.n_edges, dtype=torch.complex128)
+        elif formulation == "HJ":
+            s_m = torch.zeros(mesh.n_edges, dtype=torch.complex128)
+            s_e = torch.zeros(mesh.n_faces, dtype=torch.complex128)
         else:
-            raise ValueError(f"Unknown formulation: {simulation._formulation}")
+            raise ValueError(f"Unknown formulation: {formulation}")
 
         if self.location is not None:
             # Create loop geometry
@@ -381,14 +425,14 @@ class LoopSource(BaseFDEMSrc):
             for i in range(self.n_segments):
                 segment_center = loop_points[i]
 
-                if simulation._formulation == "EB":
-                    edge_centers = simulation.mesh.edges
+                if formulation == "EB":
+                    edge_centers = mesh.edges
                     distances = torch.norm(edge_centers - segment_center, dim=1)
                     closest_idx = torch.argmin(distances)
                     s_e[closest_idx] += self.current * segment_length / self.n_segments
 
-                elif simulation._formulation == "HJ":
-                    face_centers = simulation.mesh.faces
+                elif formulation == "HJ":
+                    face_centers = mesh.faces
                     distances = torch.norm(face_centers - segment_center, dim=1)
                     closest_idx = torch.argmin(distances)
                     s_e[closest_idx] += self.current * segment_length / self.n_segments
