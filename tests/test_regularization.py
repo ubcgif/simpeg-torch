@@ -16,6 +16,7 @@ from simpegtorch.regularization import (
 )
 
 from simpegtorch.discretize import TensorMesh
+from simpegtorch.simulation.base.mappings import BaseMapping
 
 torch.set_default_dtype(torch.float64)
 
@@ -46,17 +47,20 @@ class TestBaseRegularization:
 
     def test_smallness(self, test_data):
         mesh, model = test_data
-        reg = Smallness(mesh=mesh, reference_model=model)
         eps_tensor = torch.rand_like(model) * 1e2
         deviated_mesh = model + eps_tensor
-        phi = reg(deviated_mesh)
+        # Create a mapping that stores the deviated model
+        mapping = BaseMapping(deviated_mesh)
+        reg = Smallness(mesh=mesh, mapping=mapping, reference_model=model)
+        phi = reg()
         assert torch.allclose(phi, torch.sum(eps_tensor**2))
 
     def test_smoothness_first_order_zero(self, test_data):
         # constant model should have zero smoothness
         mesh, model = test_data
-        reg = SmoothnessFirstOrder(mesh=mesh)
-        phi = reg(model)
+        mapping = BaseMapping(model)
+        reg = SmoothnessFirstOrder(mesh=mesh, mapping=mapping)
+        phi = reg()
         assert torch.allclose(phi, torch.tensor(0.0))
 
     def test_smoothness_first_order_nonzero(self, test_data):
@@ -65,21 +69,23 @@ class TestBaseRegularization:
         # Create a model with a linear gradient
         model = torch.arange(mesh.nC, dtype=torch.float64)
 
-        reg = SmoothnessFirstOrder(mesh=mesh)
-        phi = reg(model)
+        mapping = BaseMapping(model)
+        reg = SmoothnessFirstOrder(mesh=mesh, mapping=mapping)
+        phi = reg()
         # Check that the smoothness is non-zero
         assert torch.all(phi > 0)
 
     def test_smoothness_3_dirs(self, test_data):
         mesh, model = test_data
-        reg_x = SmoothnessFirstOrder(mesh=mesh, orientation="x")
-        reg_y = SmoothnessFirstOrder(mesh=mesh, orientation="y")
-        reg_z = SmoothnessFirstOrder(mesh=mesh, orientation="z")
         # Create a model with a linear gradient in all three directions
         model = torch.arange(mesh.nC, dtype=torch.float64)
-        phi_x = reg_x(model)
-        phi_y = reg_y(model)
-        phi_z = reg_z(model)
+        mapping = BaseMapping(model)
+        reg_x = SmoothnessFirstOrder(mesh=mesh, mapping=mapping, orientation="x")
+        reg_y = SmoothnessFirstOrder(mesh=mesh, mapping=mapping, orientation="y")
+        reg_z = SmoothnessFirstOrder(mesh=mesh, mapping=mapping, orientation="z")
+        phi_x = reg_x()
+        phi_y = reg_y()
+        phi_z = reg_z()
         # Check that the smoothness in each direction is non-zero
         assert torch.all(phi_x > 0)
         assert torch.all(phi_y > 0)
@@ -87,14 +93,15 @@ class TestBaseRegularization:
 
     def test_second_order_smoothness_zero(self, test_data):
         mesh, model = test_data
-        reg_x = SmoothnessSecondOrder(mesh=mesh, orientation="x")
-        reg_y = SmoothnessSecondOrder(mesh=mesh, orientation="y")
-        reg_z = SmoothnessSecondOrder(mesh=mesh, orientation="z")
         # Create a model with a linear gradient in all three directions
         model = torch.arange(mesh.nC, dtype=torch.float64)
-        phi_x = reg_x(model)
-        phi_y = reg_y(model)
-        phi_z = reg_z(model)
+        mapping = BaseMapping(model)
+        reg_x = SmoothnessSecondOrder(mesh=mesh, mapping=mapping, orientation="x")
+        reg_y = SmoothnessSecondOrder(mesh=mesh, mapping=mapping, orientation="y")
+        reg_z = SmoothnessSecondOrder(mesh=mesh, mapping=mapping, orientation="z")
+        phi_x = reg_x()
+        phi_y = reg_y()
+        phi_z = reg_z()
         # Check that the smoothness in each direction is non-zero
         assert torch.all(phi_x > 0)
         assert torch.all(phi_y > 0)
@@ -109,13 +116,14 @@ class TestBaseRegularization:
         x_coords = cell_centers[:, 0]  # x-coordinates
         linear_model_x = x_coords.clone()
 
-        reg_x = SmoothnessFirstOrder(mesh=mesh, orientation="x")
-        reg_y = SmoothnessFirstOrder(mesh=mesh, orientation="y")
-        reg_z = SmoothnessFirstOrder(mesh=mesh, orientation="z")
+        mapping = BaseMapping(linear_model_x)
+        reg_x = SmoothnessFirstOrder(mesh=mesh, mapping=mapping, orientation="x")
+        reg_y = SmoothnessFirstOrder(mesh=mesh, mapping=mapping, orientation="y")
+        reg_z = SmoothnessFirstOrder(mesh=mesh, mapping=mapping, orientation="z")
 
-        phi_x = reg_x(linear_model_x)
-        phi_y = reg_y(linear_model_x)
-        phi_z = reg_z(linear_model_x)
+        phi_x = reg_x()
+        phi_y = reg_y()
+        phi_z = reg_z()
 
         # For linear model in x: first derivative in x should be constant (1.0)
         # so smoothness should be non-zero but consistent
@@ -138,15 +146,27 @@ class TestBaseRegularization:
         # Create quadratic model for comparison: m = x_coord^2
         quadratic_model_x = x_coords**2
 
-        reg_x = SmoothnessSecondOrder(mesh=mesh, orientation="x")
-        reg_y = SmoothnessSecondOrder(mesh=mesh, orientation="y")
-        reg_z = SmoothnessSecondOrder(mesh=mesh, orientation="z")
+        mapping_linear = BaseMapping(linear_model_x)
+        mapping_quad = BaseMapping(quadratic_model_x)
 
-        phi_linear_x = reg_x(linear_model_x)
-        phi_linear_y = reg_y(linear_model_x)
-        phi_linear_z = reg_z(linear_model_x)
+        reg_x_linear = SmoothnessSecondOrder(
+            mesh=mesh, mapping=mapping_linear, orientation="x"
+        )
+        reg_y_linear = SmoothnessSecondOrder(
+            mesh=mesh, mapping=mapping_linear, orientation="y"
+        )
+        reg_z_linear = SmoothnessSecondOrder(
+            mesh=mesh, mapping=mapping_linear, orientation="z"
+        )
+        reg_x_quad = SmoothnessSecondOrder(
+            mesh=mesh, mapping=mapping_quad, orientation="x"
+        )
 
-        phi_quad_x = reg_x(quadratic_model_x)
+        phi_linear_x = reg_x_linear()
+        phi_linear_y = reg_y_linear()
+        phi_linear_z = reg_z_linear()
+
+        phi_quad_x = reg_x_quad()
 
         # For linear model: second derivative should be much smaller than quadratic
         # (may not be exactly zero due to boundary effects)
@@ -163,13 +183,14 @@ class TestBaseRegularization:
         x_coords = cell_centers[:, 0]  # x-coordinates
         quadratic_model_x = x_coords**2
 
-        reg_x = SmoothnessSecondOrder(mesh=mesh, orientation="x")
-        reg_y = SmoothnessSecondOrder(mesh=mesh, orientation="y")
-        reg_z = SmoothnessSecondOrder(mesh=mesh, orientation="z")
+        mapping = BaseMapping(quadratic_model_x)
+        reg_x = SmoothnessSecondOrder(mesh=mesh, mapping=mapping, orientation="x")
+        reg_y = SmoothnessSecondOrder(mesh=mesh, mapping=mapping, orientation="y")
+        reg_z = SmoothnessSecondOrder(mesh=mesh, mapping=mapping, orientation="z")
 
-        phi_x = reg_x(quadratic_model_x)
-        phi_y = reg_y(quadratic_model_x)
-        phi_z = reg_z(quadratic_model_x)
+        phi_x = reg_x()
+        phi_y = reg_y()
+        phi_z = reg_z()
 
         # For quadratic model in x: second derivative in x should be constant (2.0)
         assert torch.all(phi_x > 0)
@@ -181,16 +202,19 @@ class TestBaseRegularization:
     def test_sparse_l1_norm(self, test_data):
         """Test L1 sparse regularization"""
         mesh, model = test_data
-        reg = Sparse(mesh=mesh, norm=1)  # L1 norm
 
         # Test with zero model
         zero_model = torch.zeros_like(model)
-        phi_zero = reg(zero_model)
+        mapping_zero = BaseMapping(zero_model)
+        reg_zero = Sparse(mesh=mesh, mapping=mapping_zero, norm=1)  # L1 norm
+        phi_zero = reg_zero()
         assert torch.allclose(phi_zero, torch.tensor(0.0))
 
         # Test with positive model
         positive_model = torch.ones_like(model) * 5.0
-        phi_pos = reg(positive_model)
+        mapping_pos = BaseMapping(positive_model)
+        reg_pos = Sparse(mesh=mesh, mapping=mapping_pos, norm=1)
+        phi_pos = reg_pos()
         expected_l1 = torch.sum(torch.abs(positive_model))
         assert torch.allclose(phi_pos, expected_l1)
 
@@ -198,20 +222,24 @@ class TestBaseRegularization:
         mixed_model = torch.tensor(
             [-2.0, 1.0, -3.0, 4.0] * (mesh.nC // 4), dtype=torch.float64
         )[: mesh.nC]
-        phi_mixed = reg(mixed_model)
+        mapping_mixed = BaseMapping(mixed_model)
+        reg_mixed = Sparse(mesh=mesh, mapping=mapping_mixed, norm=1)
+        phi_mixed = reg_mixed()
         expected_mixed_l1 = torch.sum(torch.abs(mixed_model))
         assert torch.allclose(phi_mixed, expected_mixed_l1)
 
     def test_sparse_l2_norm(self, test_data):
         """Test L2 sparse regularization (should be same as Smallness)"""
         mesh, model = test_data
-        reg_sparse = Sparse(mesh=mesh, norm=2)  # L2 norm
-        reg_smallness = Smallness(mesh=mesh)
 
         # Compare with random model
         random_model = torch.randn_like(model) * 10.0
-        phi_sparse = reg_sparse(random_model)
-        phi_smallness = reg_smallness(random_model)
+        mapping = BaseMapping(random_model)
+        reg_sparse = Sparse(mesh=mesh, mapping=mapping, norm=2)  # L2 norm
+        reg_smallness = Smallness(mesh=mesh, mapping=mapping)
+
+        phi_sparse = reg_sparse()
+        phi_smallness = reg_smallness()
 
         # Should be identical for L2 norm without reference model
         assert torch.allclose(phi_sparse, phi_smallness)
@@ -220,10 +248,13 @@ class TestBaseRegularization:
         """Test sparse regularization with reference model"""
         mesh, model = test_data
         reference = torch.ones_like(model) * 2.0
-        reg = Sparse(mesh=mesh, norm=1, reference_model=reference)
 
         # Test model identical to reference
-        phi_same = reg(reference)
+        mapping_same = BaseMapping(reference)
+        reg_same = Sparse(
+            mesh=mesh, mapping=mapping_same, norm=1, reference_model=reference
+        )
+        phi_same = reg_same()
         assert torch.allclose(phi_same, torch.tensor(0.0))
 
         # Test deviation from reference
@@ -233,7 +264,11 @@ class TestBaseRegularization:
                 [1.0, -1.0, 2.0, -2.0] * (mesh.nC // 4), dtype=torch.float64
             )[: mesh.nC]
         )
-        phi_dev = reg(deviated_model)
+        mapping_dev = BaseMapping(deviated_model)
+        reg_dev = Sparse(
+            mesh=mesh, mapping=mapping_dev, norm=1, reference_model=reference
+        )
+        phi_dev = reg_dev()
         expected_dev = torch.sum(torch.abs(deviated_model - reference))
         assert torch.allclose(phi_dev, expected_dev)
 
@@ -244,11 +279,12 @@ class TestBaseRegularization:
             [2.0, -1.0, 3.0, -4.0] * (mesh.nC // 4), dtype=torch.float64
         )[: mesh.nC]
 
-        reg_l1 = Sparse(mesh=mesh, norm=1)
-        reg_l2 = Sparse(mesh=mesh, norm=2)
+        mapping = BaseMapping(test_model)
+        reg_l1 = Sparse(mesh=mesh, mapping=mapping, norm=1)
+        reg_l2 = Sparse(mesh=mesh, mapping=mapping, norm=2)
 
-        phi_l1 = reg_l1(test_model)
-        phi_l2 = reg_l2(test_model)
+        phi_l1 = reg_l1()
+        phi_l2 = reg_l2()
 
         # L1 norm: sum of absolute values
         expected_l1 = torch.sum(torch.abs(test_model))

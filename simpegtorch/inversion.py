@@ -64,36 +64,36 @@ class BaseInversion:
         Parameters
         ----------
         m0 : array_like
-            Starting model
+            Starting model (trainable parameters, not full model)
 
         Returns
         -------
         numpy.ndarray
-            Recovered model
+            Recovered model (full model in mesh space)
         """
-        # Use the provided model directly (it should already be properly configured)
-        if isinstance(m0, np.ndarray):
-            m0 = torch.tensor(
-                m0, dtype=self.dtype, device=self.device, requires_grad=True
-            )
-        elif isinstance(m0, torch.Tensor):
-            # Ensure requires_grad is True and move to correct device/dtype
-            m0 = m0.to(dtype=self.dtype, device=self.device)
-            if not m0.requires_grad:
-                m0.requires_grad_(True)
+        # Get the mapping from regularization
+        mapping = self.inv_prob.reg.mapping
 
-        self.model = m0
+        # Convert m0 to tensor if needed
+        if isinstance(m0, np.ndarray):
+            m0 = torch.tensor(m0, dtype=self.dtype, device=self.device)
+        elif isinstance(m0, torch.Tensor):
+            m0 = m0.to(dtype=self.dtype, device=self.device)
+
+        # Update the mapping's trainable parameters with m0
+        with torch.no_grad():
+            mapping.trainable_parameters.copy_(m0)
 
         # Initialize directives
         self._call_directives("initialize")
 
-        # Setup optimizer with the actual model parameters
+        # Setup optimizer with the mapping's trainable parameters
         optimizer = self.inv_prob.optimizer
-        # Update optimizer to use the actual model parameters
-        optimizer.param_groups[0]["params"] = [self.model]
+        # Update optimizer to use the mapping's trainable parameters
+        optimizer.param_groups[0]["params"] = [mapping.trainable_parameters]
 
         print(f"Running inversion with {len(self.directives)} directives")
-        print(f"Initial model shape: {self.model.shape}")
+        print(f"Trainable parameters shape: {mapping.trainable_parameters.shape}")
         print(f"Device: {self.device}, dtype: {self.dtype}")
 
         # Main optimization loop
@@ -103,15 +103,15 @@ class BaseInversion:
             optimizer.zero_grad()
 
             # Compute objective function
-            phi = self.inv_prob(self.model)
+            phi = self.inv_prob()
 
             # Backward pass for gradients
             phi.backward(retain_graph=True)
 
             # Store objective function components
             with torch.no_grad():
-                phi_d = self.inv_prob.dmisfit(self.model)
-                phi_m = self.inv_prob.reg(self.model)
+                phi_d = self.inv_prob.dmisfit()
+                phi_m = self.inv_prob.reg()
 
                 self.phi_d_history.append(phi_d.item())
                 self.phi_m_history.append(phi_m.item())
@@ -120,14 +120,14 @@ class BaseInversion:
 
             # Check gradients before step
             grad_norm = (
-                self.model.grad.norm().item() if self.model.grad is not None else 0.0
+                mapping.trainable_parameters.grad.norm().item()
+                if mapping.trainable_parameters.grad is not None
+                else 0.0
             )
-
-            # Get individual grad info from misfir and regularization
 
             # Update parameters
             # supply the closure to the optimizer if needed
-            optimizer.step(closure=lambda: self.inv_prob(self.model))
+            optimizer.step(closure=lambda: self.inv_prob())
 
             # Print iteration info
             if self.iteration % 1 == 0:
@@ -149,7 +149,10 @@ class BaseInversion:
         if self.reason_for_stop:
             print(f"Reason for stopping: {self.reason_for_stop}")
 
-        return self.model.detach().cpu().numpy()
+        # Return the full model (after mapping)
+        with torch.no_grad():
+            full_model = mapping.forward()
+        return full_model.detach().cpu().numpy()
 
     def _call_directives(self, directive_type: str):
         """Call all directives of specified type"""
@@ -195,22 +198,17 @@ class BaseInvProblem:
         self.max_iter = max_iter
         self.optimizer = optimizer
 
-    def __call__(self, model: torch.Tensor) -> torch.Tensor:
+    def __call__(self) -> torch.Tensor:
         """
         Evaluate objective function: φ(m) = φ_d(m) + β × φ_m(m)
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
         torch.Tensor
             Objective function value
         """
-        phi_d = self.dmisfit(model)
-        phi_m = self.reg(model)
+        phi_d = self.dmisfit()
+        phi_m = self.reg()
         return phi_d + self.beta * phi_m
 
 
@@ -301,7 +299,7 @@ class TargetMisfit(InversionDirective):
         else:
             # Fallback - use current misfit divided by large factor
             with torch.no_grad():
-                current_misfit = self.inv_prob.dmisfit(self.inversion.model)
+                current_misfit = self.inv_prob.dmisfit()
                 self.target = current_misfit.item() / 100.0
 
         print(f"TargetMisfit: target = {self.target:.2e}")
@@ -338,8 +336,8 @@ class BetaEstimate_ByEig(InversionDirective):
         """Estimate and set initial beta"""
         # Simple heuristic: ratio of current misfit values
         with torch.no_grad():
-            phi_d = self.inv_prob.dmisfit(self.inversion.model)
-            phi_m = self.inv_prob.reg(self.inversion.model)
+            phi_d = self.inv_prob.dmisfit()
+            phi_m = self.inv_prob.reg()
 
             if phi_m.item() > 0:
                 beta_est = self.beta0_ratio * phi_d.item() / phi_m.item()

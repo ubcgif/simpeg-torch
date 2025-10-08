@@ -18,18 +18,22 @@ from simpegtorch.inversion import (
     TargetMisfit,
     BetaEstimate_ByEig,
 )
+from simpegtorch.simulation.base.mappings import BaseMapping
 
 
 class MockDataMisfit:
     """Mock data misfit class for testing"""
 
-    def __init__(self, n_data=10, misfit_value=100.0):
+    def __init__(self, mapping, n_data=10, misfit_value=100.0):
+        self.mapping = mapping
         self.n_data = n_data
         self.misfit_value = misfit_value
         self.call_count = 0
 
-    def __call__(self, model):
+    def __call__(self):
         self.call_count += 1
+        # Get model from mapping
+        model = self.mapping.forward()
         # Return a value that depends on model to enable gradients
         return self.misfit_value * torch.ones(
             1, dtype=model.dtype, device=model.device
@@ -39,12 +43,15 @@ class MockDataMisfit:
 class MockRegularization:
     """Mock regularization class for testing"""
 
-    def __init__(self, reg_value=10.0):
+    def __init__(self, mapping, reg_value=10.0):
+        self.mapping = mapping
         self.reg_value = reg_value
         self.call_count = 0
 
-    def __call__(self, model):
+    def __call__(self):
         self.call_count += 1
+        # Get model from mapping
+        model = self.mapping.forward()
         # Return a value that depends on model to enable gradients
         return self.reg_value * torch.ones(
             1, dtype=model.dtype, device=model.device
@@ -74,21 +81,27 @@ class MockOptimizer:
 
 
 @pytest.fixture
-def mock_dmisfit():
-    """Create mock data misfit"""
-    return MockDataMisfit()
-
-
-@pytest.fixture
-def mock_reg():
-    """Create mock regularization"""
-    return MockRegularization()
-
-
-@pytest.fixture
 def test_model():
     """Create test model"""
     return torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0], dtype=torch.float64)
+
+
+@pytest.fixture
+def test_mapping(test_model):
+    """Create test mapping"""
+    return BaseMapping(test_model.clone())
+
+
+@pytest.fixture
+def mock_dmisfit(test_mapping):
+    """Create mock data misfit"""
+    return MockDataMisfit(test_mapping)
+
+
+@pytest.fixture
+def mock_reg(test_mapping):
+    """Create mock regularization"""
+    return MockRegularization(test_mapping)
 
 
 @pytest.fixture
@@ -120,9 +133,10 @@ class TestBaseInvProblem:
         beta = 2.0
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, mock_optimizer, beta=beta)
 
-        phi = inv_prob(test_model)
+        phi = inv_prob()
 
         # Should be phi_d + beta * phi_m (with model-dependent components)
+        # Model comes from the mapping
         phi_d_expected = mock_dmisfit.misfit_value + 0.01 * torch.sum(test_model**2)
         phi_m_expected = mock_reg.reg_value + 0.001 * torch.sum(test_model**2)
         expected = phi_d_expected + beta * phi_m_expected
@@ -150,14 +164,20 @@ class TestBaseInversion:
             assert directive.inversion is inversion
             assert directive.inv_prob is inv_prob
 
-    def test_initialization_with_numpy_model(self, mock_dmisfit, mock_reg):
+    def test_initialization_with_numpy_model(self, test_model):
         """Test inversion run with numpy initial model"""
-        # Use numpy array as initial model
+        # Use numpy array as initial model (trainable parameters)
         m0 = np.array([1.0, 2.0, 3.0])
 
-        # Create optimizer with a model tensor
-        model_tensor = torch.tensor(m0, requires_grad=True, dtype=torch.float64)
-        optimizer = torch.optim.Adam([model_tensor], lr=0.01)
+        # Create mapping
+        mapping = BaseMapping(torch.tensor(m0, dtype=torch.float64))
+
+        # Create mock dmisfit and reg with this mapping
+        mock_dmisfit = MockDataMisfit(mapping)
+        mock_reg = MockRegularization(mapping)
+
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, optimizer, max_iter=2)
         inversion = BaseInversion(inv_prob)
@@ -167,27 +187,33 @@ class TestBaseInversion:
         assert isinstance(result, np.ndarray)
         assert result.shape == m0.shape
 
-    def test_run_with_torch_model(self, mock_dmisfit, mock_reg, test_model):
+    def test_run_with_torch_model(self, test_model, test_mapping):
         """Test inversion run with torch tensor initial model"""
-        # Create optimizer with the actual test model
-        model_copy = test_model.clone().requires_grad_(True)
-        optimizer = torch.optim.Adam([model_copy], lr=0.01)
+        # Create mock dmisfit and reg
+        mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_reg = MockRegularization(test_mapping)
+
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([test_mapping.trainable_parameters], lr=0.01)
 
         # Create mock inv_prob that limits iterations
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, optimizer, max_iter=2)
 
         inversion = BaseInversion(inv_prob)
-        result = inversion.run(model_copy)
+        result = inversion.run(test_model.clone())
 
         assert isinstance(result, np.ndarray)
         assert result.shape == test_model.shape
         assert inversion.iteration == 2  # Should run for max_iter iterations
 
-    def test_directive_calls(self, mock_dmisfit, mock_reg, test_model):
+    def test_directive_calls(self, test_model, test_mapping):
         """Test that directives are called at appropriate times"""
-        # Create optimizer with the actual test model
-        model_copy = test_model.clone().requires_grad_(True)
-        optimizer = torch.optim.Adam([model_copy], lr=0.01)
+        # Create mock dmisfit and reg
+        mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_reg = MockRegularization(test_mapping)
+
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([test_mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, optimizer, max_iter=1)
 
@@ -196,7 +222,7 @@ class TestBaseInversion:
         directive2 = Mock(spec=InversionDirective)
 
         inversion = BaseInversion(inv_prob, directives=[directive1, directive2])
-        inversion.run(model_copy)
+        inversion.run(test_model.clone())
 
         # Check that initialize was called
         directive1.initialize.assert_called_once()
@@ -210,18 +236,21 @@ class TestBaseInversion:
         directive1.finish.assert_called_once()
         directive2.finish.assert_called_once()
 
-    def test_history_tracking(self, mock_dmisfit, mock_reg, test_model):
+    def test_history_tracking(self, test_model, test_mapping):
         """Test that inversion tracks objective function history"""
-        # Create optimizer with the actual test model
-        model_copy = test_model.clone().requires_grad_(True)
-        optimizer = torch.optim.Adam([model_copy], lr=0.01)
+        # Create mock dmisfit and reg
+        mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_reg = MockRegularization(test_mapping)
+
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([test_mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(
             mock_dmisfit, mock_reg, optimizer, max_iter=3, beta=2.0
         )
 
         inversion = BaseInversion(inv_prob)
-        inversion.run(model_copy)
+        inversion.run(test_model.clone())
 
         # Check that history was recorded
         assert len(inversion.phi_d_history) == 3
@@ -234,11 +263,14 @@ class TestBaseInversion:
         assert all(phi_m > 0 for phi_m in inversion.phi_m_history)
         assert all(beta == 2.0 for beta in inversion.beta_history)
 
-    def test_convergence_by_directive(self, mock_dmisfit, mock_reg, test_model):
+    def test_convergence_by_directive(self, test_model, test_mapping):
         """Test that inversion can be stopped by directive"""
-        # Create optimizer with the actual test model
-        model_copy = test_model.clone().requires_grad_(True)
-        optimizer = torch.optim.Adam([model_copy], lr=0.01)
+        # Create mock dmisfit and reg
+        mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_reg = MockRegularization(test_mapping)
+
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([test_mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, optimizer, max_iter=100)
 
@@ -251,7 +283,7 @@ class TestBaseInversion:
 
         directive = ConvergenceDirective()
         inversion = BaseInversion(inv_prob, directives=[directive])
-        inversion.run(model_copy)
+        inversion.run(test_model.clone())
 
         assert inversion.converged
         assert inversion.iteration == 2
@@ -294,11 +326,18 @@ class TestBetaSchedule:
         assert schedule.cooling_factor == cooling_factor
         assert schedule.cooling_rate == cooling_rate
 
-    def test_beta_cooling(self, mock_dmisfit, mock_reg):
+    def test_beta_cooling(self):
         """Test beta cooling schedule"""
-        # Create test model and optimizer
-        test_model = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        optimizer = torch.optim.Adam([test_model], lr=0.01)
+        # Create test model and mapping
+        test_model = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float64)
+        mapping = BaseMapping(test_model)
+
+        # Create mock dmisfit and reg
+        mock_dmisfit = MockDataMisfit(mapping)
+        mock_reg = MockRegularization(mapping)
+
+        # Create optimizer
+        optimizer = torch.optim.Adam([mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(
             mock_dmisfit, mock_reg, optimizer, beta=8.0, max_iter=10
@@ -461,22 +500,25 @@ class TestBetaEstimate_ByEig:
         assert inv_prob.beta != 1.0  # Should have changed from initial value
 
     def test_zero_regularization_handling(
-        self, mock_dmisfit, mock_reg, test_model, mock_optimizer
+        self, test_model, test_mapping, mock_dmisfit, mock_optimizer
     ):
         """Test handling when regularization is zero"""
 
         # Create a mock that truly returns zero regularization
         class ZeroRegularization:
-            def __call__(self, model):
+            def __init__(self, mapping):
+                self.mapping = mapping
+
+            def __call__(self):
+                model = self.mapping.forward()
                 return torch.tensor(0.0, dtype=model.dtype, device=model.device)
 
-        zero_reg = ZeroRegularization()
+        zero_reg = ZeroRegularization(test_mapping)
 
         inv_prob = BaseInvProblem(mock_dmisfit, zero_reg, mock_optimizer, beta=5.0)
 
         # Create mock inversion
         inversion = Mock()
-        inversion.model = test_model
 
         estimator = BetaEstimate_ByEig(beta0_ratio=2.0)
         estimator.inv_prob = inv_prob
@@ -492,11 +534,14 @@ class TestBetaEstimate_ByEig:
 class TestInversionIntegration:
     """Integration tests combining multiple components"""
 
-    def test_full_inversion_workflow(self, mock_dmisfit, mock_reg, test_model):
+    def test_full_inversion_workflow(self, test_model, test_mapping):
         """Test complete inversion workflow with multiple directives"""
-        # Create optimizer with the actual test model
-        model_copy = test_model.clone().requires_grad_(True)
-        optimizer = torch.optim.Adam([model_copy], lr=0.01)
+        # Create mock dmisfit and reg
+        mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_reg = MockRegularization(test_mapping)
+
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([test_mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(
             mock_dmisfit, mock_reg, optimizer, beta=8.0, max_iter=10
@@ -510,7 +555,7 @@ class TestInversionIntegration:
         directives = [beta_estimate, beta_schedule, target_misfit]
         inversion = BaseInversion(inv_prob, directives=directives)
 
-        result = inversion.run(model_copy)
+        result = inversion.run(test_model.clone())
 
         # Check that result is valid
         assert isinstance(result, np.ndarray)
@@ -521,26 +566,28 @@ class TestInversionIntegration:
         assert len(inversion.phi_m_history) > 0
         assert len(inversion.beta_history) > 0
 
-    def test_convergence_by_target_misfit(self, mock_dmisfit, mock_reg, test_model):
+    def test_convergence_by_target_misfit(self, test_model, test_mapping):
         """Test inversion stops when target misfit is reached"""
 
         # Set up decreasing misfit values
         class DecreasingMisfit:
-            def __init__(self):
+            def __init__(self, mapping):
+                self.mapping = mapping
                 self.call_count = 0
                 self.values = [100.0, 50.0, 30.0, 20.0, 10.0, 5.0, 1.0]
 
-            def __call__(self, model):
+            def __call__(self):
+                model = self.mapping.forward()
                 value = self.values[min(self.call_count, len(self.values) - 1)]
                 self.call_count += 1
                 # Return decreasing value without model dependence to ensure convergence
                 return torch.tensor(value, dtype=model.dtype, device=model.device)
 
-        decreasing_misfit = DecreasingMisfit()
+        decreasing_misfit = DecreasingMisfit(test_mapping)
+        mock_reg = MockRegularization(test_mapping)
 
-        # Create optimizer with the actual test model
-        model_copy = test_model.clone().requires_grad_(True)
-        optimizer = torch.optim.Adam([model_copy], lr=0.01)
+        # Create optimizer with the mapping's trainable parameters
+        optimizer = torch.optim.Adam([test_mapping.trainable_parameters], lr=0.01)
 
         inv_prob = BaseInvProblem(
             decreasing_misfit, mock_reg, optimizer, beta=1.0, max_iter=100
@@ -551,7 +598,7 @@ class TestInversionIntegration:
         target_misfit.target = 8.0  # Should stop around iteration 5-6
 
         inversion = BaseInversion(inv_prob, directives=[target_misfit])
-        inversion.run(model_copy)
+        inversion.run(test_model.clone())
 
         assert inversion.converged
         assert "Target misfit reached" in inversion.reason_for_stop
@@ -561,37 +608,44 @@ class TestInversionIntegration:
 class TestInversionErrorHandling:
     """Test error handling in inversion classes"""
 
-    def test_missing_dmisfit_methods(self, mock_reg, test_model, mock_optimizer):
+    def test_missing_dmisfit_methods(self, test_mapping, mock_reg, mock_optimizer):
         """Test handling when dmisfit doesn't have required methods"""
 
         # Create minimal dmisfit without standard methods
         class MinimalMisfit:
-            def __call__(self, model):
+            def __init__(self, mapping):
+                self.mapping = mapping
+
+            def __call__(self):
                 return torch.tensor(1.0)
 
-        minimal_misfit = MinimalMisfit()
+        minimal_misfit = MinimalMisfit(test_mapping)
         # Create a new optimizer instance for this test
         dummy_param = torch.tensor([1.0], requires_grad=True)
         test_optimizer = torch.optim.Adam([dummy_param], lr=0.01)
         inv_prob = BaseInvProblem(minimal_misfit, mock_reg, test_optimizer)
 
         # Should still work
-        phi = inv_prob(test_model)
+        phi = inv_prob()
         assert torch.isfinite(phi)
 
 
 class TestInversionDeviceAndDtype:
     """Test device and dtype handling in inversion"""
 
-    def test_device_consistency(self, mock_dmisfit, mock_reg):
+    def test_device_consistency(self):
         """Test that inversion maintains device consistency"""
         device = "cpu"  # Use CPU for CI compatibility
         dtype = torch.float32
 
-        test_model = torch.tensor(
-            [1.0, 2.0, 3.0], dtype=dtype, device=device, requires_grad=True
-        )
-        test_optimizer = torch.optim.Adam([test_model], lr=0.01)
+        test_model = torch.tensor([1.0, 2.0, 3.0], dtype=dtype, device=device)
+        mapping = BaseMapping(test_model)
+
+        # Create mocks with this mapping
+        mock_dmisfit = MockDataMisfit(mapping)
+        mock_reg = MockRegularization(mapping)
+
+        test_optimizer = torch.optim.Adam([mapping.trainable_parameters], lr=0.01)
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, test_optimizer)
         inversion = BaseInversion(inv_prob, device=device, dtype=dtype)
 
@@ -600,10 +654,16 @@ class TestInversionDeviceAndDtype:
         assert result.dtype == np.float32  # numpy equivalent
 
     @pytest.mark.parametrize("device", ["cpu"])  # Only test CPU for CI
-    def test_inversion_on_device(self, mock_dmisfit, mock_reg, device):
+    def test_inversion_on_device(self, device):
         """Test inversion computation on different devices"""
-        test_model = torch.tensor([1.0, 2.0, 3.0], device=device, requires_grad=True)
-        test_optimizer = torch.optim.Adam([test_model], lr=0.01)
+        test_model = torch.tensor([1.0, 2.0, 3.0], device=device)
+        mapping = BaseMapping(test_model)
+
+        # Create mocks with this mapping
+        mock_dmisfit = MockDataMisfit(mapping)
+        mock_reg = MockRegularization(mapping)
+
+        test_optimizer = torch.optim.Adam([mapping.trainable_parameters], lr=0.01)
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, test_optimizer, max_iter=2)
 
         inversion = BaseInversion(inv_prob, device=device)
