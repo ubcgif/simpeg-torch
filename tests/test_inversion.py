@@ -169,11 +169,15 @@ class TestBaseInversion:
         # Use numpy array as initial model (trainable parameters)
         m0 = np.array([1.0, 2.0, 3.0])
 
-        # Create mapping
+        # Create mapping (initial model is set in mapping)
         mapping = BaseMapping(torch.tensor(m0, dtype=torch.float64))
 
         # Create mock dmisfit and reg with this mapping
         mock_dmisfit = MockDataMisfit(mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = mapping
+
         mock_reg = MockRegularization(mapping)
 
         # Create optimizer with the mapping's trainable parameters
@@ -182,15 +186,19 @@ class TestBaseInversion:
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, optimizer, max_iter=2)
         inversion = BaseInversion(inv_prob)
 
-        result = inversion.run(m0)
+        result = inversion.run()
 
-        assert isinstance(result, np.ndarray)
-        assert result.shape == m0.shape
+        # Result is now the mapping object
+        assert isinstance(result, BaseMapping)
 
     def test_run_with_torch_model(self, test_model, test_mapping):
         """Test inversion run with torch tensor initial model"""
         # Create mock dmisfit and reg
         mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = test_mapping
+
         mock_reg = MockRegularization(test_mapping)
 
         # Create optimizer with the mapping's trainable parameters
@@ -200,16 +208,19 @@ class TestBaseInversion:
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, optimizer, max_iter=2)
 
         inversion = BaseInversion(inv_prob)
-        result = inversion.run(test_model.clone())
+        result = inversion.run()
 
-        assert isinstance(result, np.ndarray)
-        assert result.shape == test_model.shape
+        assert isinstance(result, BaseMapping)
         assert inversion.iteration == 2  # Should run for max_iter iterations
 
     def test_directive_calls(self, test_model, test_mapping):
         """Test that directives are called at appropriate times"""
         # Create mock dmisfit and reg
         mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = test_mapping
+
         mock_reg = MockRegularization(test_mapping)
 
         # Create optimizer with the mapping's trainable parameters
@@ -222,7 +233,7 @@ class TestBaseInversion:
         directive2 = Mock(spec=InversionDirective)
 
         inversion = BaseInversion(inv_prob, directives=[directive1, directive2])
-        inversion.run(test_model.clone())
+        inversion.run()
 
         # Check that initialize was called
         directive1.initialize.assert_called_once()
@@ -240,6 +251,10 @@ class TestBaseInversion:
         """Test that inversion tracks objective function history"""
         # Create mock dmisfit and reg
         mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = test_mapping
+
         mock_reg = MockRegularization(test_mapping)
 
         # Create optimizer with the mapping's trainable parameters
@@ -250,7 +265,7 @@ class TestBaseInversion:
         )
 
         inversion = BaseInversion(inv_prob)
-        inversion.run(test_model.clone())
+        inversion.run()
 
         # Check that history was recorded
         assert len(inversion.phi_d_history) == 3
@@ -267,6 +282,10 @@ class TestBaseInversion:
         """Test that inversion can be stopped by directive"""
         # Create mock dmisfit and reg
         mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = test_mapping
+
         mock_reg = MockRegularization(test_mapping)
 
         # Create optimizer with the mapping's trainable parameters
@@ -283,7 +302,7 @@ class TestBaseInversion:
 
         directive = ConvergenceDirective()
         inversion = BaseInversion(inv_prob, directives=[directive])
-        inversion.run(test_model.clone())
+        inversion.run()
 
         assert inversion.converged
         assert inversion.iteration == 2
@@ -334,6 +353,10 @@ class TestBetaSchedule:
 
         # Create mock dmisfit and reg
         mock_dmisfit = MockDataMisfit(mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = mapping
+
         mock_reg = MockRegularization(mapping)
 
         # Create optimizer
@@ -347,7 +370,7 @@ class TestBetaSchedule:
         schedule = BetaSchedule(cooling_factor=2.0, cooling_rate=3)
         inversion = BaseInversion(inv_prob, directives=[schedule])
 
-        inversion.run(test_model)
+        inversion.run()
 
         # Beta should have been cooled at iterations 3, 6, 9
         # Starting beta: 8.0
@@ -538,6 +561,10 @@ class TestInversionIntegration:
         """Test complete inversion workflow with multiple directives"""
         # Create mock dmisfit and reg
         mock_dmisfit = MockDataMisfit(test_mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = test_mapping
+
         mock_reg = MockRegularization(test_mapping)
 
         # Create optimizer with the mapping's trainable parameters
@@ -555,11 +582,10 @@ class TestInversionIntegration:
         directives = [beta_estimate, beta_schedule, target_misfit]
         inversion = BaseInversion(inv_prob, directives=directives)
 
-        result = inversion.run(test_model.clone())
+        result = inversion.run()
 
-        # Check that result is valid
-        assert isinstance(result, np.ndarray)
-        assert result.shape == test_model.shape
+        # Check that result is valid (now returns mapping object)
+        assert isinstance(result, BaseMapping)
 
         # Check that history was recorded
         assert len(inversion.phi_d_history) > 0
@@ -575,6 +601,9 @@ class TestInversionIntegration:
                 self.mapping = mapping
                 self.call_count = 0
                 self.values = [100.0, 50.0, 30.0, 20.0, 10.0, 5.0, 1.0]
+                self.solver = Mock()
+                self.solver.pde = Mock()
+                self.solver.pde.mapping = mapping
 
             def __call__(self):
                 model = self.mapping.forward()
@@ -598,7 +627,7 @@ class TestInversionIntegration:
         target_misfit.target = 8.0  # Should stop around iteration 5-6
 
         inversion = BaseInversion(inv_prob, directives=[target_misfit])
-        inversion.run(test_model.clone())
+        inversion.run()
 
         assert inversion.converged
         assert "Target misfit reached" in inversion.reason_for_stop
@@ -643,15 +672,20 @@ class TestInversionDeviceAndDtype:
 
         # Create mocks with this mapping
         mock_dmisfit = MockDataMisfit(mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = mapping
+
         mock_reg = MockRegularization(mapping)
 
         test_optimizer = torch.optim.Adam([mapping.trainable_parameters], lr=0.01)
         inv_prob = BaseInvProblem(mock_dmisfit, mock_reg, test_optimizer)
         inversion = BaseInversion(inv_prob, device=device, dtype=dtype)
 
-        result = inversion.run(test_model)
+        result = inversion.run()
 
-        assert result.dtype == np.float32  # numpy equivalent
+        # Result is now a mapping object, not numpy array
+        assert isinstance(result, BaseMapping)
 
     @pytest.mark.parametrize("device", ["cpu"])  # Only test CPU for CI
     def test_inversion_on_device(self, device):
@@ -661,6 +695,10 @@ class TestInversionDeviceAndDtype:
 
         # Create mocks with this mapping
         mock_dmisfit = MockDataMisfit(mapping)
+        mock_dmisfit.solver = Mock()
+        mock_dmisfit.solver.pde = Mock()
+        mock_dmisfit.solver.pde.mapping = mapping
+
         mock_reg = MockRegularization(mapping)
 
         test_optimizer = torch.optim.Adam([mapping.trainable_parameters], lr=0.01)
@@ -668,10 +706,10 @@ class TestInversionDeviceAndDtype:
 
         inversion = BaseInversion(inv_prob, device=device)
 
-        result = inversion.run(test_model)
+        result = inversion.run()
 
-        assert isinstance(result, np.ndarray)
-        assert not np.isnan(result).any()
+        # Result is now a mapping object, not numpy array
+        assert isinstance(result, BaseMapping)
 
 
 if __name__ == "__main__":

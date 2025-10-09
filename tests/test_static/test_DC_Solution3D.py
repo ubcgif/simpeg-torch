@@ -1,6 +1,9 @@
 import torch
 import unittest
 
+# Set default dtype to float64 for numerical precision
+torch.set_default_dtype(torch.float64)
+
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.simulation.resistivity import (
     DC3DNodal,
@@ -102,7 +105,6 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_dc_nodal_fields(self, tolerance=0.1):
         # Create Nodal Neumann sim in both simpegtorch and simpeg
-        self.setUp()
         # Create PDE and solver for new architecture
         pde_torch = DC3DNodal(
             self.mesh_torch,
@@ -167,7 +169,6 @@ class DCSolutionTest(unittest.TestCase):
 
     def test_dc_cell_centered_fields(self, tolerance=0.1):
         # Create Cell-Centered Dirichlet sim in both simpegtorch and simpeg
-        self.setUp()
         # Create PDE and solver for new architecture
         pde_torch = DC3DCellCentered(
             self.mesh_torch,
@@ -237,7 +238,6 @@ class DCSolutionTest(unittest.TestCase):
         )
 
     def test_compare_A_matrices(self, tolerance=1e-8):
-        self.setUp()
         # Create PDE for new architecture
         pde_torch = DC3DCellCentered(
             self.mesh_torch,
@@ -283,9 +283,8 @@ class DCSolutionTest(unittest.TestCase):
             err_msg="A matrices are not equal.",
         )
         print("A Matrices are equal.")
-    
+
     def test_compare_A_matrices_nodal(self, tolerance=1e-7):
-        self.setUp()
         # Create PDE for new architecture
         pde_torch = DC3DNodal(
             self.mesh_torch,
@@ -326,4 +325,3 @@ class DCSolutionTest(unittest.TestCase):
             err_msg="A matrices are not equal.",
         )
         print("A Matrices are equal.")
-

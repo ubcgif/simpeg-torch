@@ -1,16 +1,16 @@
 """
 DC Resistivity Inversion Example using New PDE Framework
 
-This example demonstrates a complete inversion workflow:
+This example demonstrates a complete inversion workflow with the new
+framework that uses automatic differentiation (no wrapper needed):
 1. Create synthetic "true" model
 2. Generate synthetic data with noise
-3. Set up inversion with regularization
+3. Set up inversion with regularization (direct solver interface)
 4. Run inversion with beta cooling
 5. Visualize results
 """
 
 import torch
-import numpy as np
 import matplotlib.pyplot as plt
 from simpegtorch.discretize import TensorMesh
 from simpegtorch.simulation.resistivity import (
@@ -19,7 +19,7 @@ from simpegtorch.simulation.resistivity import (
     RxDipole,
     Survey,
 )
-from simpegtorch.simulation.base import DirectSolver, SimulationWrapper, mappings
+from simpegtorch.simulation.base import DirectSolver, mappings
 from simpegtorch.inversion import (
     BaseInversion,
     BaseInvProblem,
@@ -28,10 +28,60 @@ from simpegtorch.inversion import (
     BetaEstimate_ByEig,
 )
 from simpegtorch.data_misfit import L2DataMisfit
-from simpegtorch.regularization import TikhonovRegularization
+from simpegtorch.regularization import Smallness, SmoothnessFirstOrder
 
 # Set default dtype
 torch.set_default_dtype(torch.float64)
+
+
+# ============================================================================
+# Combined Regularization (Tikhonov-style)
+# ============================================================================
+class TikhonovRegularization(torch.nn.Module):
+    """
+    Combined Tikhonov regularization: smallness + smoothness terms.
+
+    φ_m = α_s||m - m_ref||² + α_x||∇_x m||² + α_y||∇_y m||² + α_z||∇_z m||²
+    """
+
+    def __init__(
+        self,
+        mesh,
+        mapping,
+        alpha_s=1.0,
+        alpha_x=1.0,
+        alpha_y=1.0,
+        alpha_z=1.0,
+        reference_model=None,
+    ):
+        super().__init__()
+        self.mesh = mesh
+        self.mapping = mapping
+
+        # Smallness term
+        self.smallness = Smallness(
+            mesh, mapping=mapping, alpha=alpha_s, reference_model=reference_model
+        )
+
+        # Smoothness terms
+        self.smoothness_x = SmoothnessFirstOrder(
+            mesh, mapping=mapping, orientation="x", alpha=alpha_x
+        )
+        self.smoothness_y = SmoothnessFirstOrder(
+            mesh, mapping=mapping, orientation="y", alpha=alpha_y
+        )
+        self.smoothness_z = SmoothnessFirstOrder(
+            mesh, mapping=mapping, orientation="z", alpha=alpha_z
+        )
+
+    def forward(self):
+        """Compute combined regularization"""
+        phi = self.smallness()
+        phi = phi + self.smoothness_x()
+        phi = phi + self.smoothness_y()
+        phi = phi + self.smoothness_z()
+        return phi
+
 
 print("=" * 70)
 print("DC Resistivity Inversion with New PDE Framework")
@@ -49,7 +99,9 @@ hz = torch.ones(10) * 10.0
 origin = torch.tensor([0.0, 0.0, -100.0])  # Start 100m below surface
 mesh = TensorMesh([hx, hy, hz], origin=origin)
 
-print(f"Mesh: {mesh.n_cells} cells ({mesh.shape_cells[0]}x{mesh.shape_cells[1]}x{mesh.shape_cells[2]})")
+print(
+    f"Mesh: {mesh.n_cells} cells ({mesh.shape_cells[0]}x{mesh.shape_cells[1]}x{mesh.shape_cells[2]})"
+)
 
 # ============================================================================
 # 2. Create survey
@@ -109,7 +161,7 @@ anomaly_mask = (
     & (cell_centers[:, 2] > -60.0)
     & (cell_centers[:, 2] < -40.0)
 )
-sigma_true[anomaly_mask] = 0.1  # 10 Ohm-m anomaly
+sigma_true[anomaly_mask] = 10.0  # 10 Ohm-m anomaly
 
 # Create mapping and PDE for forward modeling
 sigma_map_true = mappings.BaseMapping(sigma_true)
@@ -137,35 +189,44 @@ print(f"SNR: ~{1/noise_level:.0f}:1")
 print("\n[4/6] Setting up inversion...")
 
 # Starting model: homogeneous half-space (best guess)
-sigma_start = torch.ones(mesh.n_cells, requires_grad=True) * sigma_background
-sigma_map_inv = mappings.BaseMapping(sigma_start)
+# Use LogMapping to ensure conductivity stays positive during optimization
+log_sigma_start = torch.log(torch.ones(mesh.n_cells) * sigma_background)
+log_sigma_start.requires_grad = True
+sigma_map_inv = mappings.LogMapping(log_sigma_start)
 
-# Create PDE and simulation wrapper for inversion
+# Create PDE and solver for inversion (no wrapper needed!)
 pde_inv = DC3DCellCentered(mesh, survey, sigma_map_inv, bc_type="Dirichlet")
 solver_inv = DirectSolver(pde_inv)
-simulation = SimulationWrapper(pde_inv, solver_inv)
 
 # Data misfit with uncertainty weighting
 uncertainties = noise_level * torch.abs(data_obs) + noise_floor
-dmisfit = L2DataMisfit(simulation, data_obs, weights=1.0 / uncertainties)
+dmisfit = L2DataMisfit(solver_inv, data_obs, weights=1.0 / uncertainties)
 
 # Regularization (Tikhonov smooth inversion)
-alpha_s = 1e-4  # Smoothness weight
+# Note: reference model is in log-space since we're using LogMapping
+alpha_s = 1e-4  # Smallness weight
 alpha_x = 1.0  # x-derivative weight
 alpha_y = 1.0  # y-derivative weight
 alpha_z = 1.0  # z-derivative weight
 
+log_sigma_ref = torch.log(torch.ones(mesh.n_cells) * sigma_background)
 reg = TikhonovRegularization(
     mesh,
+    mapping=sigma_map_inv,
     alpha_s=alpha_s,
     alpha_x=alpha_x,
     alpha_y=alpha_y,
     alpha_z=alpha_z,
-    reference_model=sigma_background * torch.ones(mesh.n_cells),
+    reference_model=log_sigma_ref,
 )
 
 # Optimizer (Adam works well for geophysical inversions)
-optimizer = torch.optim.Adam([sigma_map_inv.trainable_parameters], lr=0.01)
+optimizer = torch.optim.LBFGS(
+    [sigma_map_inv.trainable_parameters],
+    lr=1.0,
+    max_iter=20,
+    line_search_fn="strong_wolfe",
+)
 
 # Inverse problem
 inv_prob = BaseInvProblem(
@@ -176,13 +237,20 @@ inv_prob = BaseInvProblem(
 directives = [
     BetaEstimate_ByEig(beta0_ratio=1.0),  # Estimate initial beta
     BetaSchedule(cooling_factor=2.0, cooling_rate=3),  # Cool beta every 3 iterations
-    TargetMisfit(chi_factor=1.0),  # Stop when misfit ~ # of data points
+    TargetMisfit(chi_factor=0.1),  # Stop when misfit ~ # of data points
 ]
 
 inversion = BaseInversion(inv_prob, directives=directives, device="cpu")
 
-print(f"Starting model: {sigma_start.mean():.4f} ± {sigma_start.std():.4f} S/m")
-print(f"True anomaly contrast: {sigma_true[anomaly_mask].mean() / sigma_background:.1f}x")
+# Display starting model in conductivity space (not log-space)
+with torch.no_grad():
+    sigma_start_display = sigma_map_inv.forward()
+print(
+    f"Starting model: {sigma_start_display.mean():.4f} ± {sigma_start_display.std():.4f} S/m"
+)
+print(
+    f"True anomaly contrast: {sigma_true[anomaly_mask].mean() / sigma_background:.1f}x"
+)
 
 # ============================================================================
 # 5. Run inversion
@@ -190,14 +258,21 @@ print(f"True anomaly contrast: {sigma_true[anomaly_mask].mean() / sigma_backgrou
 print("\n[5/6] Running inversion...")
 print("-" * 70)
 
-sigma_recovered = inversion.run(sigma_start)
+# Run inversion (initial model already set in mapping)
+recovered_mapping = inversion.run()
+
+# Get recovered model from mapping
+with torch.no_grad():
+    sigma_recovered = recovered_mapping.forward()
 
 print("-" * 70)
 print(f"\nInversion completed in {inversion.iteration} iterations")
 print(
     f"Final misfit: φ_d = {inversion.phi_d_history[-1]:.2e} (target: {dmisfit.n_data:.2e})"
 )
-print(f"Recovered model: {sigma_recovered.mean():.4f} ± {sigma_recovered.std():.4f} S/m")
+print(
+    f"Recovered model: {sigma_recovered.mean():.4f} ± {sigma_recovered.std():.4f} S/m"
+)
 
 # ============================================================================
 # 6. Plot results
@@ -228,8 +303,9 @@ ax.grid(True, alpha=0.3)
 # Plot 3: Data fit
 ax = axes[0, 2]
 ax.plot(data_obs.numpy(), data_clean.numpy(), "b.", alpha=0.5, label="Observed")
-pred_final = simulation.dpred()
-ax.plot(data_obs.numpy(), pred_final.detach().numpy(), "r.", alpha=0.5, label="Predicted")
+with torch.no_grad():
+    pred_final = solver_inv.forward()
+ax.plot(data_obs.numpy(), pred_final.numpy(), "r.", alpha=0.5, label="Predicted")
 lims = [data_obs.min().item(), data_obs.max().item()]
 ax.plot(lims, lims, "k--", alpha=0.3)
 ax.set_xlabel("Observed Data (V)")
@@ -245,13 +321,14 @@ z_coords = mesh.cell_centers_z
 
 # Reshape models to grid
 true_grid = sigma_true.reshape(mesh.shape_cells)[:, y_slice_idx, :]
-recovered_grid = (
-    torch.tensor(sigma_recovered).reshape(mesh.shape_cells)[:, y_slice_idx, :]
-)
+recovered_grid = torch.tensor(sigma_recovered).reshape(mesh.shape_cells)[
+    :, y_slice_idx, :
+]
 
-# Convert to resistivity for plotting
-rho_true = 1.0 / true_grid.numpy()
-rho_recovered = 1.0 / recovered_grid.numpy()
+# Convert to resistivity for plotting (with small epsilon for safety)
+epsilon = 1e-10
+rho_true = 1.0 / (true_grid.numpy() + epsilon)
+rho_recovered = 1.0 / (recovered_grid.numpy() + epsilon)
 
 # Plot 4: True model (resistivity)
 ax = axes[1, 0]

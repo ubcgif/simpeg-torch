@@ -108,14 +108,9 @@ class L1DataMisfit(BaseDataMisfit):
     More robust to outliers than L2 misfit.
     """
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute L1 data misfit: φ_d = ||W_d(F(m) - d_obs)||₁
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
@@ -123,7 +118,7 @@ class L1DataMisfit(BaseDataMisfit):
             L1 data misfit value
         """
         # Forward simulation
-        data_pred = self.simulation.forward()
+        data_pred = self.solver.forward()
 
         # Residual
         residual = data_pred - self.data_obs
@@ -153,14 +148,9 @@ class HuberDataMisfit(BaseDataMisfit):
         super().__init__(**kwargs)
         self.delta = delta
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute Huber data misfit.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
