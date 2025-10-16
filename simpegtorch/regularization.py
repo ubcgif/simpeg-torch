@@ -67,9 +67,9 @@ class BaseRegularization(nn.Module):
         # Cell gradient operators (already PyTorch sparse tensors)
         if hasattr(self.mesh, "cell_gradient_x"):
             self.register_buffer("grad_x", self.mesh.cell_gradient_x)
-        if hasattr(self.mesh, "cell_gradient_y") and self.mesh.dim >= 2:
+        if self.mesh.dim >= 2 and hasattr(self.mesh, "cell_gradient_y"):
             self.register_buffer("grad_y", self.mesh.cell_gradient_y)
-        if hasattr(self.mesh, "cell_gradient_z") and self.mesh.dim >= 3:
+        if self.mesh.dim >= 3 and hasattr(self.mesh, "cell_gradient_z"):
             self.register_buffer("grad_z", self.mesh.cell_gradient_z)
 
         # Volume weighting

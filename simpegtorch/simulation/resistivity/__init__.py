@@ -36,6 +36,7 @@ Use DC3DCellCentered or DC3DNodal with DirectSolver:
 """
 
 from .dc_pde import DC3DCellCentered, DC3DNodal
+from .dc_2D_pde import DC2DCellCentered
 from .sources import BaseSrc, Pole as SrcPole, Dipole as SrcDipole, Multipole
 from .receivers import BaseRx, Pole as RxPole, Dipole as RxDipole
 from .survey import Survey
@@ -48,6 +49,7 @@ __all__ = [
     # PDE formulations
     "DC3DCellCentered",
     "DC3DNodal",
+    "DC2DCellCentered",
     # Sources
     "BaseSrc",
     "Src",
