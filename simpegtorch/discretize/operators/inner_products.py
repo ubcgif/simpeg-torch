@@ -109,10 +109,13 @@ class InnerProducts(BaseMesh):
 
         tensorType = TensorType(self, model)
 
-        Mu = make_property_tensor(self, model, sparse_type="coo", device=self.device)
+        # Preserve dtype from model if it's a tensor
+        model_dtype = model.dtype if torch.is_tensor(model) else self.dtype
+
+        Mu = make_property_tensor(self, model, dtype=model_dtype, sparse_type="coo", device=self.device)
         # Uses COO format for the inner product matrix as CSR does not support batch operations or additions
         # This is platform dependent, so we use COO format for consistency
-        Ps = self._getInnerProductProjectionMatrices(projection_type, tensorType)
+        Ps = self._getInnerProductProjectionMatrices(projection_type, tensorType, dtype=model_dtype)
         # Manually sum sparse tensors since torch.sum doesn't work on lists of sparse tensors
         A_stack = [torch.sparse.mm(torch.sparse.mm(P.T, Mu), P) for P in Ps]
         A = A_stack[0]
@@ -126,7 +129,7 @@ class InnerProducts(BaseMesh):
 
         return A
 
-    def _getInnerProductProjectionMatrices(self, projection_type, tensorType):
+    def _getInnerProductProjectionMatrices(self, projection_type, tensorType, dtype=None):
         """Get the inner product projection matrices.
 
         Parameters
@@ -135,6 +138,8 @@ class InnerProducts(BaseMesh):
             'F' for faces 'E' for edges
         tensorType : TensorType
             type of the tensor: TensorType(mesh, sigma)
+        dtype : torch.dtype, optional
+            Data type for the projection matrices. If None, uses mesh.dtype
 
         Returns
         -------
@@ -147,11 +152,13 @@ class InnerProducts(BaseMesh):
         if projection_type not in ["F", "E"]:
             raise TypeError("projection_type must be 'F' for faces or 'E' for edges")
 
+        dtype = dtype if dtype is not None else self.dtype
+
         d = self.dim
         # We will multiply by sqrt on each side to keep symmetry
         V = kron(
-            speye(d, device=self.device, dtype=self.dtype),
-            sdiag(torch.sqrt((2 ** (-d)) * self.cell_volumes)),
+            speye(d, device=self.device, dtype=dtype),
+            sdiag(torch.sqrt((2 ** (-d)) * self.cell_volumes), dtype=dtype),
             sparse_type="coo",
         )
 
@@ -168,7 +175,7 @@ class InnerProducts(BaseMesh):
                 "011": [None, None, ("fXm", "fYp", "fZp")],
                 "111": [None, None, ("fXp", "fYp", "fZp")],
             }
-            proj = getattr(self, "_getFaceP" + ("x" * d))()
+            proj = getattr(self, "_getFaceP" + ("x" * d))(dtype=dtype)
 
         elif projection_type == "E":
             locs = {
@@ -181,12 +188,13 @@ class InnerProducts(BaseMesh):
                 "011": [None, None, ("eX3", "eY2", "eZ2")],
                 "111": [None, None, ("eX3", "eY3", "eZ3")],
             }
-            proj = getattr(self, "_getEdgeP" + ("x" * d))()
+            proj = getattr(self, "_getEdgeP" + ("x" * d))(dtype=dtype)
 
         return [torch.sparse.mm(V, proj(*locs[node][d - 1])) for node in nodes]
 
-    def _getFacePx(M):
+    def _getFacePx(M, dtype=None):
         """Return a function for creating face projection matrices in 1D."""
+        dtype = dtype if dtype is not None else M.dtype
         ii = torch.arange(M.shape_cells[0], device=M.device, dtype=torch.long)
 
         def Px(xFace):
@@ -197,7 +205,7 @@ class InnerProducts(BaseMesh):
                 torch.vstack(
                     [torch.arange(M.n_cells, device=M.device, dtype=torch.long), IND]
                 ),
-                torch.ones(M.n_cells, device=M.device, dtype=M.dtype),
+                torch.ones(M.n_cells, device=M.device, dtype=dtype),
                 (M.n_cells, M.n_faces),
                 device=M.device,
             )
@@ -205,8 +213,9 @@ class InnerProducts(BaseMesh):
 
         return Px
 
-    def _getFacePxx(M):
+    def _getFacePxx(M, dtype=None):
         """Return a function for creating face projection matrices in 2D."""
+        dtype = dtype if dtype is not None else M.dtype
         # returns a function for creating projection matrices
         #
         # Mats takes you from faces a subset of all faces on only the
@@ -265,7 +274,7 @@ class InnerProducts(BaseMesh):
                         IND,
                     ]
                 ),
-                torch.ones(2 * M.n_cells, device=M.device, dtype=M.dtype),
+                torch.ones(2 * M.n_cells, device=M.device, dtype=dtype),
                 (2 * M.n_cells, M.n_faces),
                 device=M.device,
             )
@@ -274,7 +283,7 @@ class InnerProducts(BaseMesh):
 
         return Pxx
 
-    def _getFacePxxx(M):
+    def _getFacePxxx(M, dtype=None):
         """Return a function for creating face projection matrices in 3D.
 
         Mats takes you from faces a subset of all faces on only the
@@ -282,6 +291,7 @@ class InnerProducts(BaseMesh):
 
         These are centered around a single nodes.
         """
+        dtype = dtype if dtype is not None else M.dtype
         i, j, k = (
             torch.arange(M.shape_cells[0], device=M.device),
             torch.arange(M.shape_cells[1], device=M.device),
@@ -325,7 +335,7 @@ class InnerProducts(BaseMesh):
                         IND,
                     ]
                 ),
-                torch.ones(3 * M.n_cells, device=M.device, dtype=M.dtype),
+                torch.ones(3 * M.n_cells, device=M.device, dtype=dtype),
                 (3 * M.n_cells, M.n_faces),
                 device=M.device,
             )
@@ -395,18 +405,20 @@ class InnerProducts(BaseMesh):
         else:
             return M
 
-    def _getEdgePx(M):
+    def _getEdgePx(M, dtype=None):
         """Return a function for creating edge projection matrices in 1D."""
+        dtype = dtype if dtype is not None else M.dtype
 
         def Px(xEdge):
             if xEdge != "eX0":
                 raise TypeError("xEdge = {0!s}, not eX0".format(xEdge))
-            return speye(M.n_cells, device=M.device, dtype=M.dtype, sparse_type="coo")
+            return speye(M.n_cells, device=M.device, dtype=dtype, sparse_type="coo")
 
         return Px
 
-    def _getEdgePxx(M):
+    def _getEdgePxx(M, dtype=None):
         """Return a function for creating edge projection matrices in 2D."""
+        dtype = dtype if dtype is not None else M.dtype
         i, j = torch.arange(M.shape_cells[0], device=M.device), torch.arange(
             M.shape_cells[1], device=M.device
         )
@@ -435,7 +447,7 @@ class InnerProducts(BaseMesh):
                         IND,
                     ]
                 ),
-                torch.ones(2 * M.n_cells, device=M.device, dtype=M.dtype),
+                torch.ones(2 * M.n_cells, device=M.device, dtype=dtype),
                 (2 * M.n_cells, M.n_edges),
                 device=M.device,
             )
@@ -444,8 +456,9 @@ class InnerProducts(BaseMesh):
 
         return Pxx
 
-    def _getEdgePxxx(M):
+    def _getEdgePxxx(M, dtype=None):
         """Return a function for creating edge projection matrices in 3D."""
+        dtype = dtype if dtype is not None else M.dtype
         i, j, k = (
             torch.arange(M.shape_cells[0], device=M.device),
             torch.arange(M.shape_cells[1], device=M.device),
@@ -502,7 +515,7 @@ class InnerProducts(BaseMesh):
                         IND,
                     ]
                 ),
-                torch.ones(3 * M.n_cells, device=M.device, dtype=M.dtype),
+                torch.ones(3 * M.n_cells, device=M.device, dtype=dtype),
                 (3 * M.n_cells, M.n_edges),
                 device=M.device,
             )

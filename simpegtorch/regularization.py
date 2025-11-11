@@ -22,10 +22,10 @@ class BaseRegularization(nn.Module):
     ----------
     mesh : TensorMesh
         Mesh object with differential operators
-    active_cells : torch.Tensor, optional
-        Boolean tensor defining active cells
+    mapping : callable
+        Mapping function that outputs the model parameters.
     reference_model : torch.Tensor, optional
-        Reference model for regularization
+        Reference model for regularization (in mesh space)
     device : str, optional
         PyTorch device ('cpu' or 'cuda')
     dtype : torch.dtype, optional
@@ -35,7 +35,7 @@ class BaseRegularization(nn.Module):
     def __init__(
         self,
         mesh,
-        active_cells: Optional[torch.Tensor] = None,
+        mapping,
         reference_model: Optional[torch.Tensor] = None,
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
@@ -44,22 +44,15 @@ class BaseRegularization(nn.Module):
         self.mesh = mesh
         self.device = device
         self.dtype = dtype
+        self.mapping = mapping
 
         # Convert and register mesh operators as sparse tensors
         self._setup_operators()
 
-        # Get number of cells
+        # Get number of cells in mesh space
         n_cells = mesh.nC if hasattr(mesh, "nC") else len(mesh.cell_centers)
 
-        # Set active cells
-        if active_cells is not None:
-            self.register_buffer("active_cells", active_cells.to(device=device))
-        else:
-            self.register_buffer(
-                "active_cells", torch.ones(n_cells, dtype=torch.bool, device=device)
-            )
-
-        # Set reference model as a non-learned parameter
+        # Set reference model as a non-learned parameter (in mesh space)
         if reference_model is not None:
             self.register_buffer(
                 "reference_model", reference_model.to(dtype=dtype, device=device)
@@ -74,9 +67,9 @@ class BaseRegularization(nn.Module):
         # Cell gradient operators (already PyTorch sparse tensors)
         if hasattr(self.mesh, "cell_gradient_x"):
             self.register_buffer("grad_x", self.mesh.cell_gradient_x)
-        if hasattr(self.mesh, "cell_gradient_y") and self.mesh.dim >= 2:
+        if self.mesh.dim >= 2 and hasattr(self.mesh, "cell_gradient_y"):
             self.register_buffer("grad_y", self.mesh.cell_gradient_y)
-        if hasattr(self.mesh, "cell_gradient_z") and self.mesh.dim >= 3:
+        if self.mesh.dim >= 3 and hasattr(self.mesh, "cell_gradient_z"):
             self.register_buffer("grad_z", self.mesh.cell_gradient_z)
 
         # Volume weighting
@@ -86,12 +79,23 @@ class BaseRegularization(nn.Module):
             )
             self.register_buffer("vol_sqrt", vol_sqrt)
 
-    def _delta_m(self, model: torch.Tensor) -> torch.Tensor:
-        """Compute model difference from reference: m - m_ref"""
+    def _delta_m(self) -> torch.Tensor:
+        """
+        Compute model difference from reference: m_mapped - m_ref
+
+        Returns
+        -------
+        torch.Tensor
+            Mapped model difference from reference (in mesh space)
+        """
+        # Apply mapping if provided (e.g., active cell mapping or log mapping)
+
+        model = self.mapping.forward()
+
         return model - self.reference_model
 
     @abstractmethod
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """Compute regularization objective function"""
         pass
 
@@ -139,21 +143,17 @@ class Smallness(BaseRegularization):
                     torch.ones(self.mesh.nC, dtype=self.dtype, device=self.device),
                 )
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute smallness regularization: α × ||W(m - m_ref)||²
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
         torch.Tensor
             Regularization objective value
         """
-        dm = self._delta_m(model)
+        dm = self._delta_m()
+
         weighted_dm = self.weights * dm
         return self.alpha * torch.sum(weighted_dm**2)
 
@@ -242,14 +242,9 @@ class SmoothnessFirstOrder(BaseRegularization):
                 torch.ones(n_faces, dtype=self.dtype, device=self.device),
             )
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute first-order smoothness: α × ||W∇_dir m||²
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
@@ -257,9 +252,10 @@ class SmoothnessFirstOrder(BaseRegularization):
             Regularization objective value
         """
         if self.reference_model_in_smooth:
-            m_smooth = self._delta_m(model)
+            m_smooth = self._delta_m()
         else:
-            m_smooth = model
+            # Apply mapping to transform model to mesh space
+            m_smooth = self.mapping.forward()
 
         # Apply gradient operator: ∇m
         grad_m = torch.sparse.mm(self.grad_op, m_smooth.unsqueeze(1)).squeeze()
@@ -328,14 +324,9 @@ class SmoothnessSecondOrder(BaseRegularization):
                 torch.ones(n_cells, dtype=self.dtype, device=self.device),
             )
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute second-order smoothness: α × ||W∇²_dir m||²
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
@@ -343,9 +334,10 @@ class SmoothnessSecondOrder(BaseRegularization):
             Regularization objective value
         """
         if self.reference_model_in_smooth:
-            m_smooth = self._delta_m(model)
+            m_smooth = self._delta_m()
         else:
-            m_smooth = model
+            # Apply mapping to transform model to mesh space
+            m_smooth = self.mapping.forward()
 
         # Apply gradient operator twice: ∇²m = ∇ᵀ∇m
         grad_m = torch.sparse.mm(self.grad_op, m_smooth.unsqueeze(1)).squeeze()
@@ -366,6 +358,9 @@ class WeightedLeastSquares(nn.Module):
     ----------
     mesh : TensorMesh
         Mesh object
+    mapping : callable, optional
+        Mapping function that transforms input model to mesh model space.
+        If None, identity mapping is used.
     alpha_s : float, optional
         Smallness weight (default: 1.0)
     alpha_x, alpha_y, alpha_z : float, optional
@@ -381,6 +376,7 @@ class WeightedLeastSquares(nn.Module):
     def __init__(
         self,
         mesh,
+        mapping: Optional[callable] = None,
         alpha_s: float = 1.0,
         alpha_x: float = 1.0,
         alpha_y: float = 1.0,
@@ -408,7 +404,14 @@ class WeightedLeastSquares(nn.Module):
 
         # Smallness term
         if alpha_s > 0:
-            self.terms.append(Smallness(mesh, alpha=alpha_s, **kwargs))
+            self.terms.append(
+                Smallness(
+                    mesh,
+                    alpha=alpha_s,
+                    mapping=mapping,
+                    **kwargs,
+                )
+            )
 
         # First-order smoothness terms
         if alpha_x > 0:
@@ -417,6 +420,7 @@ class WeightedLeastSquares(nn.Module):
                     mesh,
                     orientation="x",
                     alpha=alpha_x,
+                    mapping=mapping,
                     reference_model_in_smooth=reference_model_in_smooth,
                     **kwargs,
                 )
@@ -427,6 +431,7 @@ class WeightedLeastSquares(nn.Module):
                     mesh,
                     orientation="y",
                     alpha=alpha_y,
+                    mapping=mapping,
                     reference_model_in_smooth=reference_model_in_smooth,
                     **kwargs,
                 )
@@ -437,6 +442,7 @@ class WeightedLeastSquares(nn.Module):
                     mesh,
                     orientation="z",
                     alpha=alpha_z,
+                    mapping=mapping,
                     reference_model_in_smooth=reference_model_in_smooth,
                     **kwargs,
                 )
@@ -449,6 +455,7 @@ class WeightedLeastSquares(nn.Module):
                     mesh,
                     orientation="x",
                     alpha=alpha_xx,
+                    mapping=mapping,
                     reference_model_in_smooth=reference_model_in_smooth,
                     **kwargs,
                 )
@@ -459,6 +466,7 @@ class WeightedLeastSquares(nn.Module):
                     mesh,
                     orientation="y",
                     alpha=alpha_yy,
+                    mapping=mapping,
                     reference_model_in_smooth=reference_model_in_smooth,
                     **kwargs,
                 )
@@ -469,31 +477,31 @@ class WeightedLeastSquares(nn.Module):
                     mesh,
                     orientation="z",
                     alpha=alpha_zz,
+                    mapping=mapping,
                     reference_model_in_smooth=reference_model_in_smooth,
                     **kwargs,
                 )
             )
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute total regularization objective.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
         torch.Tensor
             Total regularization objective value
         """
-        total = torch.tensor(0.0, dtype=model.dtype, device=model.device)
+        total = None
 
         for term in self.terms:
-            total = total + term(model)
+            term_val = term()
+            if total is None:
+                total = term_val
+            else:
+                total = total + term_val
 
-        return total
+        return total if total is not None else torch.tensor(0.0)
 
     def set_reference_model(self, reference_model: torch.Tensor):
         """Set reference model for all terms"""
@@ -543,21 +551,16 @@ class Sparse(BaseRegularization):
             "irls_weights", torch.ones(n_cells, dtype=self.dtype, device=self.device)
         )
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute sparse regularization with IRLS weighting.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
         torch.Tensor
             Regularization objective value
         """
-        dm = self._delta_m(model)
+        dm = self._delta_m()
 
         # Apply IRLS weighting
         weighted_dm = self.irls_weights * dm
@@ -570,9 +573,9 @@ class Sparse(BaseRegularization):
         else:
             return self.alpha * torch.sum(torch.abs(weighted_dm) ** self.norm)
 
-    def update_irls_weights(self, model: torch.Tensor):
+    def update_irls_weights(self):
         """Update IRLS weights based on current model"""
         with torch.no_grad():
-            dm = self._delta_m(model)
+            dm = self._delta_m()
             weights = (torch.abs(dm) + self.epsilon) ** (self.norm / 2.0 - 1.0)
             self.irls_weights.copy_(weights)

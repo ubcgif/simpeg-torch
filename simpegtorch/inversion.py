@@ -6,8 +6,7 @@ leveraging automatic differentiation and GPU acceleration.
 """
 
 import torch
-import numpy as np
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional
 
 
 class BaseInversion:
@@ -48,7 +47,6 @@ class BaseInversion:
             directive.opt = inv_prob.opt if hasattr(inv_prob, "opt") else None
 
         # Inversion state
-        self.model = None
         self.iteration = 0
         self.phi_d_history = []
         self.phi_m_history = []
@@ -57,36 +55,21 @@ class BaseInversion:
         self.converged = False
         self.reason_for_stop = None
 
-    def run(self, m0: Union[np.ndarray, torch.Tensor]) -> np.ndarray:
+    def run(self) -> torch.Tensor:
         """
-        Run the inversion starting from initial model m0.
-
-        Parameters
-        ----------
-        m0 : array_like
-            Starting model
+        Run the inversion starting
 
         Returns
         -------
-        numpy.ndarray
-            Recovered model
+        Torch.tensor
+            Recovered model (full model in mesh space)
         """
-        # Convert to PyTorch tensor
-        if isinstance(m0, np.ndarray):
-            m0 = torch.tensor(m0, dtype=self.dtype, device=self.device)
-        elif isinstance(m0, torch.Tensor):
-            m0 = m0.to(dtype=self.dtype, device=self.device)
-
-        self.model = m0.clone().requires_grad_(True)
+        optimizer = self.inv_prob.optimizer
 
         # Initialize directives
         self._call_directives("initialize")
 
-        # Setup optimizer
-        optimizer = self.inv_prob.setup_optimizer(self.model)
-
         print(f"Running inversion with {len(self.directives)} directives")
-        print(f"Initial model shape: {self.model.shape}")
         print(f"Device: {self.device}, dtype: {self.dtype}")
 
         # Main optimization loop
@@ -96,15 +79,15 @@ class BaseInversion:
             optimizer.zero_grad()
 
             # Compute objective function
-            phi = self.inv_prob(self.model)
+            phi = self.inv_prob()
 
             # Backward pass for gradients
             phi.backward(retain_graph=True)
 
             # Store objective function components
             with torch.no_grad():
-                phi_d = self.inv_prob.dmisfit(self.model)
-                phi_m = self.inv_prob.reg(self.model)
+                phi_d = self.inv_prob.dmisfit()
+                phi_m = self.inv_prob.reg()
 
                 self.phi_d_history.append(phi_d.item())
                 self.phi_m_history.append(phi_m.item())
@@ -112,13 +95,14 @@ class BaseInversion:
                 self.beta_history.append(self.inv_prob.beta)
 
             # Update parameters
-            optimizer.step()
+            # supply the closure to the optimizer if needed
+            optimizer.step(closure=lambda: self.inv_prob())
 
             # Print iteration info
             if self.iteration % 1 == 0:
                 print(
                     f"Iter {self.iteration:3d}: φ = {phi.item():.2e} "
-                    f"(φ_d = {phi_d.item():.2e}, β×φ_m = {self.inv_prob.beta*phi_m.item():.2e})"
+                    f"(φ_d = {phi_d.item():.2e}, β×φ_m = {self.inv_prob.beta*phi_m.item():.2e}) "
                 )
 
             self.iteration += 1
@@ -133,7 +117,7 @@ class BaseInversion:
         if self.reason_for_stop:
             print(f"Reason for stopping: {self.reason_for_stop}")
 
-        return self.model.detach().cpu().numpy()
+        return self.inv_prob.dmisfit.solver.pde.mapping
 
     def _call_directives(self, directive_type: str):
         """Call all directives of specified type"""
@@ -157,10 +141,8 @@ class BaseInvProblem:
         Data misfit term
     reg : BaseRegularization
         Regularization term
-    optimizer_class : str or torch.optim.Optimizer, optional
-        PyTorch optimizer class name or class (default: 'Adam')
-    optimizer_kwargs : dict, optional
-        Keyword arguments for optimizer
+    optimizer : torch.optim.Optimizer
+        Optimizer for model updates (e.g., Adam, SGD)
     beta : float, optional
         Trade-off parameter between data misfit and regularization
     max_iter : int, optional
@@ -171,8 +153,7 @@ class BaseInvProblem:
         self,
         dmisfit,
         reg,
-        optimizer_class: Union[str, Any] = "Adam",
-        optimizer_kwargs: Optional[Dict] = None,
+        optimizer: torch.optim.Optimizer,
         beta: float = 1.0,
         max_iter: int = 50,
     ):
@@ -180,36 +161,20 @@ class BaseInvProblem:
         self.reg = reg
         self.beta = beta
         self.max_iter = max_iter
+        self.optimizer = optimizer
 
-        # Setup optimizer
-        if isinstance(optimizer_class, str):
-            self.optimizer_class = getattr(torch.optim, optimizer_class)
-        else:
-            self.optimizer_class = optimizer_class
-
-        self.optimizer_kwargs = optimizer_kwargs or {"lr": 0.01}
-
-    def __call__(self, model: torch.Tensor) -> torch.Tensor:
+    def __call__(self) -> torch.Tensor:
         """
         Evaluate objective function: φ(m) = φ_d(m) + β × φ_m(m)
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
         torch.Tensor
             Objective function value
         """
-        phi_d = self.dmisfit(model)
-        phi_m = self.reg(model)
+        phi_d = self.dmisfit()
+        phi_m = self.reg()
         return phi_d + self.beta * phi_m
-
-    def setup_optimizer(self, model: torch.Tensor):
-        """Setup PyTorch optimizer for the model parameters"""
-        return self.optimizer_class([model], **self.optimizer_kwargs)
 
 
 class InversionDirective:
@@ -299,7 +264,7 @@ class TargetMisfit(InversionDirective):
         else:
             # Fallback - use current misfit divided by large factor
             with torch.no_grad():
-                current_misfit = self.inv_prob.dmisfit(self.inversion.model)
+                current_misfit = self.inv_prob.dmisfit()
                 self.target = current_misfit.item() / 100.0
 
         print(f"TargetMisfit: target = {self.target:.2e}")
@@ -336,8 +301,8 @@ class BetaEstimate_ByEig(InversionDirective):
         """Estimate and set initial beta"""
         # Simple heuristic: ratio of current misfit values
         with torch.no_grad():
-            phi_d = self.inv_prob.dmisfit(self.inversion.model)
-            phi_m = self.inv_prob.reg(self.inversion.model)
+            phi_d = self.inv_prob.dmisfit()
+            phi_m = self.inv_prob.reg()
 
             if phi_m.item() > 0:
                 beta_est = self.beta0_ratio * phi_d.item() / phi_m.item()

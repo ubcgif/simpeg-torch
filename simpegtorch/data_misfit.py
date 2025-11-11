@@ -22,7 +22,7 @@ class BaseDataMisfit(nn.Module):
 
     Parameters
     ----------
-    simulation : Simulation
+    solver : Solver
         Forward simulation object
     data : torch.Tensor
         Observed data vector
@@ -36,16 +36,14 @@ class BaseDataMisfit(nn.Module):
 
     def __init__(
         self,
-        simulation,
+        solver,
         data: torch.Tensor,
         weights: Optional[torch.Tensor] = None,
-        mapping=None,
         device: str = "cpu",
         dtype: torch.dtype = torch.float64,
     ):
         super().__init__()
-        self.simulation = simulation
-        self.mapping = mapping  # Optional mapping (e.g., log mapping)
+        self.solver = solver
         self.device = device
         self.dtype = dtype
 
@@ -65,41 +63,21 @@ class BaseDataMisfit(nn.Module):
 
         self.n_data = len(self.data_obs)
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute data misfit: φ_d = ||W_d(F(m) - d_obs)||²
 
         Parameters
         ----------
-        model : torch.Tensor
-            Model parameters (may be on active cells if mapping is provided)
 
         Returns
         -------
         torch.Tensor
             Data misfit value
         """
-        # Apply mapping if provided (e.g., active cell mapping or log mapping)
-        if self.mapping is not None:
-            if hasattr(self.mapping, "forward") and callable(self.mapping.forward):
-                # PyTorch module or object with forward method
-                full_model = self.mapping.forward(model)
-            elif callable(self.mapping):
-                # Simple callable function
-                full_model = self.mapping(model)
-            else:
-                raise TypeError(
-                    f"Mapping must be callable or have forward method, got {type(self.mapping)}"
-                )
-        else:
-            full_model = model
 
-        # Forward simulation - use dpred method like original SimPEG
-        if hasattr(self.simulation, "dpred"):
-            data_pred = self.simulation.dpred(full_model)
-        else:
-            # Fallback to calling simulation directly
-            data_pred = self.simulation(full_model)
+        # Forward simulation
+        data_pred = self.solver.forward()
 
         # Residual
         residual = data_pred - self.data_obs
@@ -130,14 +108,9 @@ class L1DataMisfit(BaseDataMisfit):
     More robust to outliers than L2 misfit.
     """
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute L1 data misfit: φ_d = ||W_d(F(m) - d_obs)||₁
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
@@ -145,7 +118,7 @@ class L1DataMisfit(BaseDataMisfit):
             L1 data misfit value
         """
         # Forward simulation
-        data_pred = self.simulation(model)
+        data_pred = self.solver.forward()
 
         # Residual
         residual = data_pred - self.data_obs
@@ -175,14 +148,9 @@ class HuberDataMisfit(BaseDataMisfit):
         super().__init__(**kwargs)
         self.delta = delta
 
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
+    def forward(self) -> torch.Tensor:
         """
         Compute Huber data misfit.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
 
         Returns
         -------
@@ -190,7 +158,7 @@ class HuberDataMisfit(BaseDataMisfit):
             Huber data misfit value
         """
         # Forward simulation
-        data_pred = self.simulation(model)
+        data_pred = self.solver.forward()
 
         # Residual
         residual = data_pred - self.data_obs
@@ -205,187 +173,3 @@ class HuberDataMisfit(BaseDataMisfit):
         )
 
         return torch.sum(huber_loss)
-
-
-class ComboDataMisfit(nn.Module):
-    """
-    Combination data misfit for joint inversions.
-
-    Combines multiple data misfit terms:
-    φ_d = Σᵢ wᵢ φ_dᵢ
-
-    Parameters
-    ----------
-    misfits : list of BaseDataMisfit
-        List of individual data misfit terms
-    weights : list of float, optional
-        Weights for each misfit term (default: equal weights)
-    """
-
-    def __init__(self, misfits: list, weights: Optional[list] = None):
-        super().__init__()
-        self.misfits = nn.ModuleList(misfits)
-
-        if weights is not None:
-            self.weights = weights
-        else:
-            self.weights = [1.0] * len(misfits)
-
-        # Total number of data points
-        self.n_data = sum(misfit.n_data for misfit in self.misfits)
-
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
-        """
-        Compute combined data misfit.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
-
-        Returns
-        -------
-        torch.Tensor
-            Combined data misfit value
-        """
-        total_misfit = torch.tensor(0.0, dtype=model.dtype, device=model.device)
-
-        for weight, misfit in zip(self.weights, self.misfits):
-            total_misfit = total_misfit + weight * misfit(model)
-
-        return total_misfit
-
-
-class PseudoHuberDataMisfit(BaseDataMisfit):
-    """
-    Pseudo-Huber data misfit for smooth robust fitting.
-
-    Smooth approximation to Huber loss that is differentiable everywhere:
-    φ(r) = δ²(√(1 + (r/δ)²) - 1)
-
-    Parameters
-    ----------
-    delta : float, optional
-        Smoothing parameter (default: 1.0)
-    **kwargs
-        Additional arguments passed to BaseDataMisfit
-    """
-
-    def __init__(self, delta: float = 1.0, **kwargs):
-        super().__init__(**kwargs)
-        self.delta = delta
-
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
-        """
-        Compute pseudo-Huber data misfit.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
-
-        Returns
-        -------
-        torch.Tensor
-            Pseudo-Huber data misfit value
-        """
-        # Forward simulation
-        data_pred = self.simulation(model)
-
-        # Residual
-        residual = data_pred - self.data_obs
-        weighted_residual = self.weights * residual
-
-        # Pseudo-Huber loss
-        pseudo_huber = self.delta**2 * (
-            torch.sqrt(1 + (weighted_residual / self.delta) ** 2) - 1
-        )
-
-        return torch.sum(pseudo_huber)
-
-
-class WeightedDataMisfit(BaseDataMisfit):
-    """
-    Data misfit with uncertainty-based weighting.
-
-    Uses data uncertainties to set weights: W_d = 1/σ where σ are standard deviations.
-
-    Parameters
-    ----------
-    simulation : Simulation
-        Forward simulation object
-    data : torch.Tensor
-        Observed data vector
-    uncertainties : torch.Tensor
-        Data uncertainties (standard deviations)
-    **kwargs
-        Additional arguments passed to BaseDataMisfit
-    """
-
-    def __init__(
-        self, simulation, data: torch.Tensor, uncertainties: torch.Tensor, **kwargs
-    ):
-        # Convert uncertainties to weights
-        if isinstance(uncertainties, np.ndarray):
-            uncertainties = torch.tensor(
-                uncertainties, dtype=kwargs.get("dtype", torch.float64)
-            )
-
-        weights = 1.0 / torch.clamp(uncertainties, min=1e-12)  # Avoid division by zero
-
-        super().__init__(simulation, data, weights=weights, **kwargs)
-
-        # Store uncertainties for reference
-        self.register_buffer(
-            "uncertainties", uncertainties.to(dtype=self.dtype, device=self.device)
-        )
-
-
-class LogDataMisfit(BaseDataMisfit):
-    """
-    Logarithmic data misfit for positive data.
-
-    Useful for data that spans many orders of magnitude (e.g., resistivity).
-    φ_d = ||W_d(log(F(m)) - log(d_obs))||²
-
-    Parameters
-    ----------
-    epsilon : float, optional
-        Small value added to prevent log(0) (default: 1e-12)
-    **kwargs
-        Additional arguments passed to BaseDataMisfit
-    """
-
-    def __init__(self, epsilon: float = 1e-12, **kwargs):
-        super().__init__(**kwargs)
-        self.epsilon = epsilon
-
-        # Convert observed data to log space
-        self.data_obs = torch.log(torch.clamp(self.data_obs, min=self.epsilon))
-
-    def forward(self, model: torch.Tensor) -> torch.Tensor:
-        """
-        Compute logarithmic data misfit.
-
-        Parameters
-        ----------
-        model : torch.Tensor
-            Model parameters
-
-        Returns
-        -------
-        torch.Tensor
-            Log data misfit value
-        """
-        # Forward simulation
-        data_pred = self.simulation(model)
-
-        # Convert to log space
-        log_data_pred = torch.log(torch.clamp(data_pred, min=self.epsilon))
-
-        # Residual in log space
-        residual = log_data_pred - self.data_obs
-
-        # Weighted misfit
-        weighted_residual = self.weights * residual
-        return torch.sum(weighted_residual**2)
